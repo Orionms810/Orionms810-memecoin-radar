@@ -1,0 +1,185 @@
+# 🎯 Memecoin Radar
+
+Un bot qui surveille les posts (X, Truth Social via RSS, news) et le flux
+temps réel de **pump.fun**. Quand un post lance un narratif, il repère les
+tokens qui le reprennent, fait des **contrôles anti-rug** et t'envoie une
+**alerte Telegram** détaillée. Ensuite il continue de surveiller le token et te
+prévient si le dev vend.
+
+> Le bot **n'achète jamais rien** et n'a **jamais** besoin de ta clé privée,
+> de ta seed phrase ni de tes mots de passe. Tu restes seul maître de tes achats.
+
+---
+
+## ⚠️ À lire avant de mettre 1 €
+
+- **La grande majorité des tokens pump.fun meurent.** D'après CoinGecko, ~69 % des
+  tokens font leur dernier trade le jour du lancement et ~4,5 % passent 90 jours.
+  Solidus Labs classait ~98,6 % des tokens comme rug pulls ou pump & dumps (une
+  mesure basée sur l'illiquidité, pas des fraudes prouvées).
+- **Tu ne battras pas les bots sur la vitesse.** Quand Trump poste, des bots
+  « snipers » créent et achètent les tokens en moins d'une seconde. Le temps que
+  l'alerte arrive et que tu cliques, ils sont déjà là, et souvent ils te vendent
+  leurs tokens. Ce radar sert à **mieux choisir et à éviter les arnaques**, pas à
+  être le premier.
+- **Commence en « paper trading ».** Laisse tourner le bot 1 ou 2 semaines sans
+  acheter, puis tape `/bilan` : il calcule ce que tu aurais gagné ou perdu en
+  achetant à chaque alerte. Si le bilan est négatif (c'est le plus probable),
+  tu as économisé ton argent.
+- **Sécurité :** utilise un wallet dédié avec un petit montant. Ne donne ta seed
+  phrase ou ta clé privée à personne : ni à un humain, ni à un bot, ni à une IA.
+  Les seuls accès dont ce projet a besoin sont des **clés API en lecture**, que tu
+  gardes chez toi dans le fichier `.env`.
+
+---
+
+## Ce que fait le bot
+
+```
+ Posts X / Truth Social / news ──► mots-clés (+ analyse IA optionnelle)
+                                          │  narratif actif 45 min
+ Flux pump.fun (PumpPortal) ──► nouveau token ──► correspond au narratif ?
+                                                         │ oui
+                       observe les trades 20 s ◄─────────┘
+                                │
+     contrôles anti-rug : achat du dev, créateur en série, top holders,
+     snipers/bundle, RugCheck, réseaux sociaux, dev qui vend...
+                                │
+            alerte Telegram ──► suivi 30 min : « le dev vend ! », « -50 % »
+                                │
+                     bilan paper trading (/bilan)
+```
+
+- **Détection des narratifs** : tickers `$XXX`, hashtags, mots en MAJUSCULES,
+  noms propres, phrases entre guillemets... Les mots trop courants sur pump.fun
+  (« trump », « pepe », « cat »...) comptent moins, automatiquement.
+- **Analyse IA (optionnelle)** : Claude lit le post, estime s'il peut lancer une
+  vague de memecoins (score de hype), devine les noms/tickers probables et donne
+  un avis sur chaque alerte.
+- **Tokens créés juste avant le post** : le bot vérifie aussi les 10 dernières
+  minutes (les bots sont parfois plus rapides que l'API X).
+- **Copies** : sur un gros narratif il y a des dizaines de tokens identiques ;
+  l'alerte indique combien de copies existent et le rang du token en volume.
+- **`/check <adresse>`** : analyse anti-rug de n'importe quel token, à la demande.
+
+---
+
+## Installation
+
+Il faut Python 3.11 ou plus récent.
+
+```bash
+git clone https://github.com/Orionms810/Orionms810-memecoin-radar.git
+cd Orionms810-memecoin-radar
+python -m venv .venv
+source .venv/bin/activate        # Windows : .venv\Scripts\activate
+pip install -r requirements.txt
+cp config.example.yaml config.yaml
+cp .env.example .env
+```
+
+Puis teste tout de suite la démo (aucune clé ni connexion nécessaire) :
+
+```bash
+python -m memebot --demo
+```
+
+## Les clés à mettre dans `.env`
+
+| Clé | Obligatoire ? | Où l'obtenir | Prix |
+|---|---|---|---|
+| `TELEGRAM_BOT_TOKEN` | Oui (sinon alertes dans le terminal) | Parle à **@BotFather** sur Telegram → `/newbot` | Gratuit |
+| `TELEGRAM_CHAT_ID` | Oui | Lance le bot, envoie `/start` à ton bot : il te répond ton chat id | Gratuit |
+| `SOLANA_RPC_URL` | Conseillé | Compte gratuit chez Helius, QuickNode... | Gratuit (palier de base) |
+| `X_BEARER_TOKEN` | Pour suivre X | developer.x.com → ton app → « Bearer Token » | Payant à l'usage (vérifie la grille dans ta console X) |
+| `ANTHROPIC_API_KEY` | Non (IA) | console.anthropic.com | Payant à l'usage, quelques centimes par jour avec peu de posts |
+
+Pour Trump, pas besoin de l'API X : il poste surtout sur **Truth Social**, suivi
+via un flux RSS gratuit (voir `config.yaml`, vérifie que l'URL fonctionne).
+
+## Lancer le bot
+
+```bash
+python -m memebot                 # mode réel (Ctrl+C pour arrêter)
+python -m memebot check <adresse> # analyse un token dans le terminal
+python -m memebot -v              # logs détaillés
+```
+
+Pour qu'il tourne 24 h/24, lance-le sur un petit serveur (VPS) ou un Raspberry Pi
+avec `tmux`, `screen` ou un service `systemd`.
+
+## Commandes Telegram
+
+| Commande | Effet |
+|---|---|
+| `/check <adresse>` | Rapport anti-rug d'un token |
+| `/narratif covfefe, $COVF` | Surveille un narratif à la main (une news vue à la télé...) |
+| `/narratifs` | Liste les narratifs actifs |
+| `/supprimer N3` | Arrête un narratif |
+| `/bilan` | Bilan paper trading des alertes |
+| `/status` | État du bot |
+| `/pause` · `/reprendre` | Coupe / remet les alertes |
+
+## Lire une alerte
+
+```
+🎯 TOKEN LIÉ À UN NARRATIF — 🟡 RISQUÉ (sécurité 62/100)
+Nugget Nation ($NN)
+📰 Narratif N1 : @realDonaldTrump — « ... NUGGET ... #NuggetNation »
+🔑 Mots-clés : nuggetnation, nugget (match 1.00)
+💰 Market cap : 38.8 SOL (~$5.8k) · courbe 5%
+⏱ Âge : 20 s · 2 autre(s) token(s) sur ce narratif, celui-ci #2 en volume
+📈 Flux : 9 achats / 0 ventes · 9 acheteurs uniques
+⚡ Momentum : 58/100
+🛡 Contrôles anti-rug
+⛔ 9 wallets ont acheté dans les 2 premières secondes (bundle/snipers probable)
+⚠️ Top 10 holders : 34% de la supply
+✅ Achat initial du dev faible : 4.0%
+```
+
+- **Sécurité** (0-100) : 🟢 ≥ 70, 🟡 40-69, 🔴 < 40 ou signal critique (le dev a
+  vendu). 🟢 veut dire « pas de signal d'arnaque évident », **pas** « sûr ».
+- **Momentum** : est-ce que de vrais acheteurs arrivent ?
+- **Match** : à quel point le nom colle au narratif.
+- Les tokens 🔴 ne sont pas envoyés par défaut (`show_dangerous: true` pour les voir).
+
+## Réglages utiles (`config.yaml`)
+
+- Trop d'alertes → monte `min_match_score` (0.7) et `min_safety_to_alert` (60).
+- Plus de vitesse → baisse `observe_seconds` (moins de données sur le token).
+- Ajoute/retire des comptes X, des flux RSS, des mots génériques.
+
+## Limites connues
+
+- PumpPortal et l'API pump.fun sont **non officielles** : leur format peut changer.
+- La réactivité dépend de la source : X est interrogé toutes les 20 s, le RSS
+  Truth Social ajoute son propre délai.
+- Le matching par mots-clés rate les tokens nommés uniquement en emoji ou dans
+  une autre langue, et peut matcher des homonymes.
+- La détection des snipers est approximative (heure de réception, pas le bloc).
+- Après la migration vers un AMM, le pool peut apparaître comme gros holder.
+- Aucun outil ne peut garantir qu'un token n'est pas une arnaque.
+
+## Structure du code
+
+```
+memebot/
+  engine.py      cerveau : relie news, flux pump.fun, analyse, alertes
+  text.py        extraction des mots-clés d'un post
+  narratives.py  narratifs actifs + matching avec les tokens
+  risk.py        score de sécurité anti-rug + momentum
+  data.py        RPC Solana, RugCheck, DexScreener, IPFS, prix du SOL
+  pumpportal.py  websocket temps réel pump.fun
+  sources/       X (API v2) et RSS
+  ai.py          analyse des posts et avis sur les alertes (Claude)
+  telegram.py    envoi des alertes et commandes
+  report.py      mise en forme des messages
+  storage.py     SQLite : tokens, alertes, bilan paper trading
+  demo.py        démo hors-ligne
+tests/           tests (pytest), sans accès réseau
+```
+
+```bash
+pip install -r requirements-dev.txt
+python -m pytest
+```

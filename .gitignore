@@ -1,0 +1,11 @@
+# Données locales du bot
+*.db
+*.db-wal
+*.db-shm
+.env
+
+# Python
+.venv/
+venv/
+__pycache__/
+.pytest_cache/

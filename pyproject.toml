@@ -1,0 +1,10 @@
+[project]
+name = "memecoin-radar"
+version = "0.1.0"
+description = "Radar à memecoins pump.fun : narratifs, détection de tokens, contrôles anti-rug, alertes Telegram"
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+asyncio_default_fixture_loop_scope = "function"
