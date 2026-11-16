@@ -2,7 +2,6 @@ anthropic>=2.9,<3
 httpx>=0.28,<1
 websockets>=15,<18
 python-dotenv>=1.0
-PyYAML>=6.0
 feedparser>=6.0
 pydantic>=2.7
 solders>=0.21,<1

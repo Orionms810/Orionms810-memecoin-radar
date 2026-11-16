@@ -1,0 +1,141 @@
+# Copie ce fichier en config.toml et adapte-le.
+# Les secrets (tokens, clés) vont dans .env, JAMAIS ici.
+# Format TOML : texte entre guillemets, true/false en minuscules, # = commentaire.
+
+[x]
+# Comptes X surveillés (nécessite X_BEARER_TOKEN dans .env, API payante).
+# weight = importance (0 à 1). aliases = mots trop liés à l'auteur, pénalisés
+# (sinon chaque token « trump » matcherait n'importe quel post de Trump).
+poll_seconds = 20           # plus c'est bas, plus c'est réactif (et plus ça coûte en requêtes)
+include_replies = false
+
+[[x.accounts]]
+username = "realDonaldTrump"
+weight = 1.0
+aliases = ["trump", "donald", "djt"]
+
+[[x.accounts]]
+username = "elonmusk"
+weight = 0.9
+aliases = ["elon", "musk"]
+
+[[x.accounts]]
+username = "cz_binance"
+weight = 0.6
+aliases = ["binance"]
+
+[rss]
+# Flux RSS gratuits. Trump poste surtout sur Truth Social : on utilise un miroir RSS
+# (l'URL ci-dessous est un exemple, vérifie qu'elle marche avant de compter dessus).
+poll_seconds = 60
+
+[[rss.feeds]]
+name = "Truth Social (Trump)"
+url = "https://trumpstruth.org/feed"
+weight = 1.0
+aliases = ["trump", "donald"]
+
+[[rss.feeds]]
+name = "Google News - memecoin"
+url = "https://news.google.com/rss/search?q=memecoin+OR+pump.fun&hl=en-US&gl=US&ceid=US:en"
+weight = 0.4
+
+[[rss.feeds]]
+name = "BBC World"
+url = "https://feeds.bbci.co.uk/news/world/rss.xml"
+weight = 0.3
+
+[narratives]
+ttl_minutes = 45            # durée de vie d'un narratif (doublée si l'IA le juge très fort)
+# Mots trop courants sur pump.fun : ils comptent beaucoup moins dans le matching.
+generic_keywords = ["trump", "donald", "elon", "musk", "coin", "token", "sol", "solana",
+                    "pump", "moon", "meme", "memecoin", "crypto", "bitcoin", "btc", "eth",
+                    "official", "the", "inu", "usa", "america", "american", "president",
+                    "news", "world", "people", "great", "today"]
+
+[matching]
+min_match_score = 0.55      # 0..1 — monte à 0.7 si tu reçois trop d'alertes
+observe_seconds = 20        # temps d'observation des trades avant l'alerte (vitesse vs fiabilité)
+retro_minutes = 10          # cherche aussi les tokens créés juste AVANT le post
+max_watched_tokens = 60
+max_alerts_per_narrative = 3
+
+[alerts]
+min_safety_to_alert = 40    # sous ce score de sécurité, pas d'alerte (0..100)
+min_momentum = 10           # ignore les tokens que personne n'achète
+show_dangerous = false      # true = alerte même les tokens 🔴 (pour apprendre)
+watch_minutes = 30          # suivi après l'alerte (alerte si le dev vend) + bilan paper trading
+rug_drop_alert_pct = 50     # alerte si la market cap chute de X % après l'alerte
+notify_narrative_min_weight = 0.8   # annonce les posts des sources importantes
+notify_narrative_min_hype = 60      # annonce les autres posts si l'IA les juge très « memeables »
+
+[ai]
+enabled = true              # nécessite ANTHROPIC_API_KEY dans .env (sinon ignoré)
+model = "claude-opus-5-5"
+effort = "low"              # low = réponse plus rapide, suffisant pour ce tri
+min_hype = 25               # sous ce score, l'IA désactive le narratif (sauf /narratif manuel)
+review_alerts = true        # l'IA ajoute un avis sous chaque alerte
+
+[data]
+# ipfs_gateway = "https://gateway.pinata.cloud"   # décommente si ipfs.io est lent
+use_pumpfun_api = true      # API non officielle pump.fun (historique du créateur)
+use_rugcheck = true
+db_path = "memebot.db"
+
+[risk]
+dev_buy_warn = 5            # % de la supply achetée par le dev au lancement
+dev_buy_danger = 15
+top10_warn = 30             # % détenu par le top 10 (hors bonding curve / pool)
+top10_danger = 45
+whale_warn = 8
+whale_danger = 15
+snipers_warn = 4            # wallets qui achètent dans les 2 premières secondes
+snipers_danger = 8
+serial_warn = 1             # autres tokens lancés par le même créateur en 24 h
+serial_danger = 3
+
+[trading]
+# "off"   = pas de trading automatique
+# "paper" = argent VIRTUEL (par défaut) : teste au moins 2 semaines avant de passer en réel
+# "live"  = VRAI argent (nécessite WALLET_PRIVATE_KEY d'un wallet DÉDIÉ dans .env)
+mode = "paper"
+paper_start_sol = 0.05      # capital virtuel (~7 $)
+
+# Taille des positions
+reserve_sol = 0.008         # jamais tradé : frais réseau + loyer du compte token
+position_pct = 0.35         # part du capital disponible par trade
+min_position_sol = 0.005    # en dessous, les frais mangent tout : le bot s'arrête
+max_position_sol = 0.5
+max_open_positions = 1
+
+# Filtres d'entrée (plus stricts que les alertes)
+min_safety = 60
+min_momentum = 30
+max_entry_mcap_sol = 100    # n'achète pas un token déjà trop monté
+max_entry_age_seconds = 180
+
+# Sorties
+stop_loss_pct = 25
+take_profit_pct = 100       # à x2...
+take_profit_fraction = 0.5  # ...vend la moitié (la mise est récupérée)
+trailing_arm_pct = 40       # trailing stop actif à partir de +40 %...
+trailing_stop_pct = 30      # ...vend tout si -30 % depuis le plus haut
+time_stop_minutes = 15      # vend si moins de +10 % après 15 min
+time_stop_min_gain_pct = 10
+stale_minutes = 5           # vend si plus aucun échange
+
+# Coupe-circuits
+daily_loss_limit_pct = 35   # plus d'achat aujourd'hui si -35 % depuis minuit (UTC)
+max_drawdown_pct = 60       # arrêt complet si -60 % depuis le plus haut (/trading on pour relancer)
+max_consecutive_losses = 3
+cooldown_minutes = 120
+
+# Exécution (mode réel)
+slippage_pct = 15
+priority_fee_sol = 0.0003
+wallet_max_balance_sol = 0.5  # refuse de trader si le wallet contient plus (protège ton wallet principal)
+
+# Simulation (mode papier)
+fee_pct = 1.75              # frais estimés par ordre : ~1,25 % pump.fun + 0,5 % PumpPortal
+tx_fee_sol = 0.0003
+paper_latency_seconds = 2.0

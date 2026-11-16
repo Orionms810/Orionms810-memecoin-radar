@@ -433,7 +433,7 @@ class Engine:
             return format_paper_stats(self.storage.paper_stats())
         if cmd in TRADING_COMMANDS:
             if not self.trader:
-                return "Trading désactivé (trading.mode: off dans config.yaml)."
+                return 'Trading désactivé (mode = "off" dans config.toml, section [trading]).'
             return await self.trader.handle_command(cmd, arg)
         if cmd == "/status":
             ws = "connecté" if self.feed and self.feed.connected else "déconnecté"

@@ -1,13 +1,13 @@
-"""Chargement de la configuration : secrets dans .env, réglages dans config.yaml."""
+"""Chargement de la configuration : secrets dans .env, réglages dans config.toml."""
 
 from __future__ import annotations
 
 import os
+import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-import yaml
 from dotenv import load_dotenv
 
 from .risk import RiskThresholds
@@ -99,12 +99,28 @@ SECTIONS = {
 }
 
 
-def load_settings(config_path: str | Path = "config.yaml", env_path: str | Path = ".env") -> Settings:
+def read_config_file(path: Path) -> dict[str, Any]:
+    """config.toml (lu par Python directement) ; config.yaml accepté si PyYAML est installé."""
+    if path.suffix.lower() in (".yaml", ".yml"):
+        try:
+            import yaml  # optionnel
+        except ImportError as e:
+            raise SystemExit("Pour un config.yaml il faut PyYAML (pip install pyyaml), "
+                             "ou utilise config.toml.") from e
+        return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    try:
+        with path.open("rb") as f:
+            return tomllib.load(f)
+    except tomllib.TOMLDecodeError as e:
+        raise SystemExit(f"Erreur dans {path} : {e}") from e
+
+
+def load_settings(config_path: str | Path = "config.toml", env_path: str | Path = ".env") -> Settings:
     load_dotenv(env_path)
     s = Settings()
     path = Path(config_path)
     if path.exists():
-        raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        raw = read_config_file(path)
         for section, mapping in SECTIONS.items():
             for key, attr in mapping.items():
                 value = (raw.get(section) or {}).get(key)

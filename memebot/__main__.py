@@ -156,7 +156,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("command", nargs="?", default="run", choices=["run", "check"])
     parser.add_argument("mint", nargs="?", help="adresse du token pour « check »")
     parser.add_argument("--demo", action="store_true", help="démo hors-ligne")
-    parser.add_argument("--config", default="config.yaml")
+    parser.add_argument("--config", default="config.toml")
     parser.add_argument("--env", default=".env")
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args(argv)

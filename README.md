@@ -107,7 +107,7 @@ ce soit. Le mode papier compte ces frais.
 2. Envoie-lui le petit montant que tu acceptes de perdre (pas plus de 0,5 SOL).
 3. Exporte sa clé privée (Phantom → Paramètres → le compte → « Afficher la clé
    privée ») et colle-la dans `.env` à `WALLET_PRIVATE_KEY`. **Nulle part ailleurs.**
-4. Dans `config.yaml`, mets `trading.mode: live`, puis relance le bot.
+4. Dans `config.toml`, section `[trading]`, mets `mode = "live"`, puis relance le bot.
 
 En mode réel, PumpPortal construit la transaction et le bot la signe sur ta
 machine. Le bot vérifie que la transaction est bien pour ton wallet, mais tu fais
@@ -127,23 +127,43 @@ bot utilise l'extraction de mots-clés).
 
 ## Installation
 
-Il faut Python 3.11 ou plus récent.
+Il faut Python 3.11 ou plus récent (https://www.python.org/downloads/).
+**Toutes les commandes se tapent dans le dossier du bot** (celui qui contient
+`README.md` et le dossier `memebot`), sinon Python répond « No module named memebot ».
+
+### Windows
+
+1. Télécharge le bot : bouton vert **Code → Download ZIP** sur GitHub, puis clic droit
+   sur le ZIP → **Extraire tout**.
+2. Ouvre le dossier extrait jusqu'à voir `README.md` et `memebot`. Clique dans la barre
+   d'adresse de l'explorateur, tape `cmd`, Entrée : un terminal s'ouvre **dans ce dossier**.
+3. Tape, une ligne à la fois :
+
+```bat
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt
+copy config.example.toml config.toml
+copy .env.example .env
+python -m memebot --demo
+```
+
+Les fois suivantes : terminal dans le dossier, puis `.venv\Scripts\activate` et la commande voulue.
+
+### Mac / Linux
 
 ```bash
 git clone https://github.com/Orionms810/Orionms810-memecoin-radar.git
 cd Orionms810-memecoin-radar
-python -m venv .venv
-source .venv/bin/activate        # Windows : .venv\Scripts\activate
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
-cp config.example.yaml config.yaml
+cp config.example.toml config.toml
 cp .env.example .env
-```
-
-Puis teste tout de suite la démo (aucune clé ni connexion nécessaire) :
-
-```bash
 python -m memebot --demo
 ```
+
+La démo ne demande aucune clé ni connexion.
 
 ## Les clés à mettre dans `.env`
 
@@ -157,7 +177,7 @@ python -m memebot --demo
 | `WALLET_PRIVATE_KEY` | Seulement en mode réel | Wallet **dédié** créé exprès (voir plus haut) | — |
 
 Pour Trump, pas besoin de l'API X : il poste surtout sur **Truth Social**, suivi
-via un flux RSS gratuit (voir `config.yaml`, vérifie que l'URL fonctionne).
+via un flux RSS gratuit (voir `config.toml`, vérifie que l'URL fonctionne).
 
 ## Lancer le bot
 
@@ -207,9 +227,9 @@ Nugget Nation ($NN)
   vendu). 🟢 veut dire « pas de signal d'arnaque évident », **pas** « sûr ».
 - **Momentum** : est-ce que de vrais acheteurs arrivent ?
 - **Match** : à quel point le nom colle au narratif.
-- Les tokens 🔴 ne sont pas envoyés par défaut (`show_dangerous: true` pour les voir).
+- Les tokens 🔴 ne sont pas envoyés par défaut (`show_dangerous = true` dans `[alerts]` pour les voir).
 
-## Réglages utiles (`config.yaml`)
+## Réglages utiles (`config.toml`)
 
 - Trop d'alertes → monte `min_match_score` (0.7) et `min_safety_to_alert` (60).
 - Plus de vitesse → baisse `observe_seconds` (moins de données sur le token).

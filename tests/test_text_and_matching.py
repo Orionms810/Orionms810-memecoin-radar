@@ -116,3 +116,17 @@ def test_manual_narrative_stays_active_and_prunes():
     assert narr.active
     book.prune(now=time.time() + 10_000)
     assert book.live() == [] and book.get(narr.id) is None
+
+
+def test_example_config_loads(tmp_path):
+    from pathlib import Path
+
+    from memebot.config import load_settings
+
+    root = Path(__file__).resolve().parent.parent
+    s = load_settings(root / "config.example.toml", tmp_path / "absent.env")
+    assert [a["username"] for a in s.x_accounts] == ["realDonaldTrump", "elonmusk", "cz_binance"]
+    assert s.rss_feeds[0]["aliases"] == ["trump", "donald"]
+    assert s.min_match_score == 0.55 and s.observe_seconds == 20 and s.ipfs_gateway is None
+    assert s.risk.serial_warn == 1 and s.trading.mode == "paper"
+    assert s.trading.stop_loss_pct == 25 and s.trading.paper_latency_seconds == 2.0

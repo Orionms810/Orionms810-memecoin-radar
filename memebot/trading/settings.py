@@ -1,4 +1,4 @@
-"""Réglages du trading automatique (section « trading » de config.yaml)."""
+"""Réglages du trading automatique (section « trading » de config.toml)."""
 
 from __future__ import annotations
 
