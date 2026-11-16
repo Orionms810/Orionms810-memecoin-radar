@@ -23,6 +23,8 @@ from .sources.rss import Feed, RSSSource
 from .sources.x_api import XAccount, XSource
 from .storage import Storage
 from .telegram import Notifier, strip_tags
+from .trading.executor import LiveExecutor, PaperExecutor, load_keypair
+from .trading.trader import Trader
 
 log = logging.getLogger("memebot")
 
@@ -59,12 +61,55 @@ def startup_warnings(s: Settings) -> list[str]:
     return w
 
 
+async def build_trader(settings: Settings, engine: Engine, http: httpx.AsyncClient,
+                       feed: PumpPortalClient) -> Trader | None:
+    ts = settings.trading
+    if ts.mode not in ("paper", "live"):
+        log.info("Trading automatique désactivé (trading.mode: %s)", ts.mode)
+        return None
+    if ts.mode == "live":
+        if not settings.wallet_secret:
+            log.error("trading.mode = live mais WALLET_PRIVATE_KEY est vide : trading désactivé.")
+            return None
+        try:
+            keypair = load_keypair(settings.wallet_secret)
+        except Exception:  # noqa: BLE001 - ne jamais afficher la clé dans les logs
+            log.error("WALLET_PRIVATE_KEY illisible (format base58 ou tableau JSON attendu).")
+            return None
+        executor = LiveExecutor(http, settings.rpc_url, keypair,
+                                slippage_pct=ts.slippage_pct, priority_fee_sol=ts.priority_fee_sol)
+        try:
+            balance = await executor.balance()
+        except Exception as e:  # noqa: BLE001
+            log.error("Impossible de lire le solde du wallet (%s) : trading désactivé.", e)
+            return None
+        if balance > ts.wallet_max_balance_sol:
+            log.error("Le wallet contient %.3f SOL (> %.3f autorisés). Utilise un wallet dédié "
+                      "avec peu d'argent. Trading désactivé.", balance, ts.wallet_max_balance_sol)
+            return None
+        log.warning("💸 MODE RÉEL ACTIF — wallet %s — solde %.4f SOL", executor.pubkey, balance)
+        trader = Trader(ts, executor, engine.storage, engine.notifier, feed=feed,
+                        sol_usd=lambda: engine.sol_usd)
+    else:
+        trader = Trader(ts, None, engine.storage, engine.notifier, feed=feed,
+                        sol_usd=lambda: engine.sol_usd)
+        trader.ex = PaperExecutor(trader.price_of, fee_pct=ts.fee_pct, tx_fee_sol=ts.tx_fee_sol,
+                                  latency=ts.paper_latency_seconds)
+        log.info("Trading en mode PAPIER (argent virtuel) — capital %.4f SOL", trader.cash)
+    trader.release = engine.release_mint
+    engine.trader = trader
+    return trader
+
+
 async def run_live(settings: Settings) -> None:
     async with httpx.AsyncClient(limits=httpx.Limits(max_connections=50)) as http:
         engine, notifier = build_live(settings, http)
         feed = PumpPortalClient(engine.on_new_token, engine.on_trade)
         engine.feed = feed
         coros = [feed.run(), engine.housekeeping()]
+        trader = await build_trader(settings, engine, http, feed)
+        if trader:
+            coros.append(trader.run())
 
         if settings.x_bearer and settings.x_accounts:
             accounts = [XAccount(username=a["username"].lstrip("@"),
@@ -87,11 +132,13 @@ async def run_live(settings: Settings) -> None:
 
         for w in startup_warnings(settings):
             log.warning(w)
-        await notifier.send("🟢 <b>Memecoin Radar démarré.</b> Tape /aide pour les commandes.")
+        mode = {"live": "💸 trading RÉEL", "paper": "🧪 trading papier"}.get(
+            trader.mode if trader else "", "trading coupé")
+        await notifier.send(f"🟢 <b>Memecoin Radar démarré</b> ({mode}). Tape /aide pour les commandes.")
         try:
             await asyncio.gather(*coros)
         finally:
-            for t in list(engine.tasks):
+            for t in list(engine.tasks) + (list(trader.tasks) if trader else []):
                 t.cancel()
             engine.storage.close()
 

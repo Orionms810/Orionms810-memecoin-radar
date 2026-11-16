@@ -81,3 +81,49 @@ risk:
   snipers_danger: 8
   serial_warn: 1          # autres tokens lancés par le même créateur en 24 h
   serial_danger: 3
+
+trading:
+  # off   = pas de trading automatique
+  # paper = argent VIRTUEL (par défaut) : teste au moins 2 semaines avant de passer en réel
+  # live  = VRAI argent (nécessite WALLET_PRIVATE_KEY d'un wallet DÉDIÉ dans .env)
+  mode: paper
+  paper_start_sol: 0.05        # capital virtuel (~7 $)
+
+  # Taille des positions
+  reserve_sol: 0.008           # jamais tradé : frais réseau + loyer du compte token
+  position_pct: 0.35           # part du capital disponible par trade
+  min_position_sol: 0.005      # en dessous, les frais mangent tout : le bot s'arrête
+  max_position_sol: 0.5
+  max_open_positions: 1
+
+  # Filtres d'entrée (plus stricts que les alertes)
+  min_safety: 60
+  min_momentum: 30
+  max_entry_mcap_sol: 100      # n'achète pas un token déjà trop monté
+  max_entry_age_seconds: 180
+
+  # Sorties
+  stop_loss_pct: 25
+  take_profit_pct: 100         # à x2...
+  take_profit_fraction: 0.5    # ...vend la moitié (la mise est récupérée)
+  trailing_arm_pct: 40         # trailing stop actif à partir de +40 %...
+  trailing_stop_pct: 30        # ...vend tout si -30 % depuis le plus haut
+  time_stop_minutes: 15        # vend si moins de +10 % après 15 min
+  time_stop_min_gain_pct: 10
+  stale_minutes: 5             # vend si plus aucun échange
+
+  # Coupe-circuits
+  daily_loss_limit_pct: 35     # plus d'achat aujourd'hui si -35 % depuis minuit (UTC)
+  max_drawdown_pct: 60         # arrêt complet si -60 % depuis le plus haut (/trading on pour relancer)
+  max_consecutive_losses: 3
+  cooldown_minutes: 120
+
+  # Exécution (mode réel)
+  slippage_pct: 15
+  priority_fee_sol: 0.0003
+  wallet_max_balance_sol: 0.5  # refuse de trader si le wallet contient plus (protège ton wallet principal)
+
+  # Simulation (mode papier)
+  fee_pct: 1.75                # frais estimés par ordre : ~1,25 % pump.fun + 0,5 % PumpPortal
+  tx_fee_sol: 0.0003
+  paper_latency_seconds: 2.0

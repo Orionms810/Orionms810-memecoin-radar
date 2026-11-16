@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 import statistics
 import time
@@ -24,6 +25,10 @@ CREATE TABLE IF NOT EXISTS alerts(
     narrative TEXT, match_score REAL, safety INTEGER, momentum INTEGER,
     verdict TEXT, entry_mcap_sol REAL, max_mcap_sol REAL, end_mcap_sol REAL,
     creator_sold INTEGER DEFAULT 0, created_at REAL, closed_at REAL);
+CREATE TABLE IF NOT EXISTS trades(
+    id INTEGER PRIMARY KEY AUTOINCREMENT, mode TEXT, mint TEXT, symbol TEXT, name TEXT,
+    opened_at REAL, closed_at REAL, entry_sol REAL, exit_sol REAL, pnl_sol REAL, reason TEXT);
+CREATE TABLE IF NOT EXISTS kv(key TEXT PRIMARY KEY, value TEXT);
 """
 
 
@@ -136,3 +141,31 @@ class Storage:
             "best": (best["symbol"], best["max_mcap_sol"] / best["entry_mcap_sol"]),
             "by_verdict": {k: statistics.median(v) for k, v in by_verdict.items()},
         }
+
+    # ------------------------------------------------------- état persistant
+    def kv_get(self, key: str, default: Any = None) -> Any:
+        row = self.db.execute("SELECT value FROM kv WHERE key=?", (key,)).fetchone()
+        return json.loads(row[0]) if row else default
+
+    def kv_set(self, key: str, value: Any) -> None:
+        self.db.execute("INSERT OR REPLACE INTO kv VALUES (?,?)", (key, json.dumps(value)))
+        self.db.commit()
+
+    # ---------------------------------------------------------------- trades
+    def add_trade(self, *, mode: str, mint: str, symbol: str, name: str, opened_at: float,
+                  entry_sol: float, exit_sol: float, pnl_sol: float, reason: str) -> None:
+        self.db.execute(
+            "INSERT INTO trades(mode,mint,symbol,name,opened_at,closed_at,entry_sol,exit_sol,"
+            "pnl_sol,reason) VALUES (?,?,?,?,?,?,?,?,?,?)",
+            (mode, mint, symbol, name, opened_at, time.time(), entry_sol, exit_sol, pnl_sol, reason))
+        self.db.commit()
+
+    def recent_trades(self, mode: str, limit: int = 10) -> list[sqlite3.Row]:
+        return self.db.execute("SELECT * FROM trades WHERE mode=? ORDER BY id DESC LIMIT ?",
+                               (mode, limit)).fetchall()
+
+    def trade_stats(self, mode: str) -> dict[str, Any]:
+        row = self.db.execute(
+            "SELECT COUNT(*), COALESCE(SUM(pnl_sol),0), COALESCE(SUM(pnl_sol>=0),0) "
+            "FROM trades WHERE mode=?", (mode,)).fetchone()
+        return {"count": int(row[0]), "pnl": float(row[1]), "wins": int(row[2])}

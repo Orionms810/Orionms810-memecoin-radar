@@ -27,6 +27,9 @@ from .models import (
 )
 from .storage import Storage
 from .telegram import Notifier, strip_tags
+from .trading.executor import PaperExecutor
+from .trading.settings import TradingSettings
+from .trading.trader import Trader
 
 B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 
@@ -104,6 +107,12 @@ async def run_demo() -> None:
     notifier = Notifier(console=True)
     engine = Engine(settings, Storage(tmp), notifier, data, FakeFeed(), ai=None)
     engine.sol_usd = 150.0
+    # Trading en mode papier avec ~7 $ virtuels
+    trader = Trader(TradingSettings(paper_latency_seconds=0.3), None, engine.storage, notifier,
+                    feed=engine.feed, sol_usd=lambda: engine.sol_usd)
+    trader.ex = PaperExecutor(trader.price_of, fee_pct=1.75, tx_fee_sol=0.0003, latency=0.3)
+    trader.release = engine.release_mint
+    engine.trader = trader
 
     print("=== DÉMO : un compte surveillé poste quelque chose de « memeable » ===")
     await engine.on_event(NewsEvent(
@@ -151,9 +160,9 @@ async def run_demo() -> None:
                           market_cap_sol=mcap_good * 0.45))
     await asyncio.sleep(settings.watch_minutes * 60 + 1)
 
-    for cmd in ("/narratifs", "/bilan", f"/check {good.mint}", "/status"):
+    for cmd in ("/narratifs", "/bilan", f"/check {good.mint}", "/trading", "/journal", "/status"):
         print(f"\n>>> {cmd}")
         print(strip_tags(await engine.handle_command(cmd) or ""))
-    for task in list(engine.tasks):
+    for task in list(engine.tasks) + list(trader.tasks):
         task.cancel()
     print("\nFin de la démo. Lance « python -m memebot » pour le mode réel.")

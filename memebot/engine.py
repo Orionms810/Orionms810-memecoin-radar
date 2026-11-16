@@ -53,7 +53,12 @@ HELP = """🤖 <b>Memecoin Radar</b> — commandes
 /bilan — bilan « paper trading » des alertes
 /status — état du bot
 /pause · /reprendre — couper / remettre les alertes
-Le bot n'achète jamais rien et n'a jamais besoin de ta clé privée."""
+<b>Trading auto</b>
+/trading — état · /trading on · /trading off
+/positions — positions ouvertes
+/vendre tout · /vendre $TICKER — vente immédiate
+/journal — derniers trades"""
+TRADING_COMMANDS = {"/trading", "/positions", "/vendre", "/journal"}
 
 
 class DataProvider(Protocol):
@@ -116,6 +121,7 @@ class Engine:
         self.tokens_seen = 0
         self.alerts_sent = 0
         self.sol_usd: float | None = None
+        self.trader: Any = None  # trading.trader.Trader si le trading est activé
 
     # ------------------------------------------------------------- utilitaires
     def spawn(self, coro: Awaitable[Any]) -> asyncio.Task:
@@ -212,6 +218,8 @@ class Engine:
         self.spawn(self._evaluate_later(cand, self.s.observe_seconds))
 
     def on_trade(self, trade: Trade) -> None:
+        if self.trader:
+            self.trader.on_trade(trade)
         cand = self.candidates.get(trade.mint)
         if not cand:
             return
@@ -310,6 +318,8 @@ class Engine:
             mint=token.mint, name=token.name, symbol=token.symbol, narrative=narr.id,
             match_score=cand.match.score, safety=risk.safety, momentum=report.momentum,
             verdict=risk.verdict[1], entry_mcap_sol=cand.alert_mcap)
+        if self.trader:
+            self.spawn(self.trader.on_signal(token, report, cand.stats, msg_id))
         if self.ai and self.s.ai_review_alerts:
             self.spawn(self._ai_review(report, msg_id))
         self._check_watch(cand)  # le dev a peut-être déjà vendu pendant l'envoi
@@ -332,8 +342,14 @@ class Engine:
 
     async def _drop(self, cand: Candidate) -> None:
         self.candidates.pop(cand.token.mint, None)
+        await self.release_mint(cand.token.mint)
+
+    async def release_mint(self, mint: str) -> None:
+        """Se désabonne des trades d'un token si plus personne ne le suit."""
+        if mint in self.candidates or (self.trader and self.trader.holds(mint)):
+            return
         if self.feed:
-            await self.feed.unsubscribe_trades([cand.token.mint])
+            await self.feed.unsubscribe_trades([mint])
 
     # --------------------------------------------------------- /check manuel
     async def manual_check(self, mint: str) -> str:
@@ -415,6 +431,10 @@ class Engine:
             return "🔔 Alertes réactivées."
         if cmd == "/bilan":
             return format_paper_stats(self.storage.paper_stats())
+        if cmd in TRADING_COMMANDS:
+            if not self.trader:
+                return "Trading désactivé (trading.mode: off dans config.yaml)."
+            return await self.trader.handle_command(cmd, arg)
         if cmd == "/status":
             ws = "connecté" if self.feed and self.feed.connected else "déconnecté"
             sol = f"${self.sol_usd:.0f}" if self.sol_usd else "?"

@@ -6,8 +6,14 @@ tokens qui le reprennent, fait des **contrôles anti-rug** et t'envoie une
 **alerte Telegram** détaillée. Ensuite il continue de surveiller le token et te
 prévient si le dev vend.
 
-> Le bot **n'achète jamais rien** et n'a **jamais** besoin de ta clé privée,
-> de ta seed phrase ni de tes mots de passe. Tu restes seul maître de tes achats.
+Il peut aussi **trader tout seul** sur les meilleures alertes, avec une gestion du
+risque stricte. Par défaut il trade en **mode papier** (argent virtuel). Le mode
+réel est désactivé tant que tu ne l'actives pas toi-même.
+
+> Le bot n'a **jamais** besoin de ta seed phrase ni de tes mots de passe. En mode
+> réel seulement, il utilise la clé privée d'un **wallet dédié** que tu crées
+> exprès, stockée chez toi dans `.env` : les transactions sont signées sur ta
+> machine, la clé n'est envoyée nulle part.
 
 ---
 
@@ -28,8 +34,7 @@ prévient si le dev vend.
   tu as économisé ton argent.
 - **Sécurité :** utilise un wallet dédié avec un petit montant. Ne donne ta seed
   phrase ou ta clé privée à personne : ni à un humain, ni à un bot, ni à une IA.
-  Les seuls accès dont ce projet a besoin sont des **clés API en lecture**, que tu
-  gardes chez toi dans le fichier `.env`.
+  Tout ce dont le projet a besoin reste chez toi, dans le fichier `.env`.
 
 ---
 
@@ -64,6 +69,62 @@ prévient si le dev vend.
 
 ---
 
+## 🤖 Trading automatique
+
+Quand une alerte passe des filtres **plus stricts** (sécurité ≥ 60, momentum ≥ 30,
+market cap < 100 SOL, token de moins de 3 min), le bot achète, puis gère seul la
+sortie :
+
+| Règle | Réglage par défaut |
+|---|---|
+| Taille de position | 35 % du capital disponible, une seule position à la fois |
+| Réserve intouchable | 0,008 SOL pour les frais et le loyer du compte token |
+| Stop-loss | -25 % |
+| Prise de profit | vend 50 % à x2 (la mise est récupérée) |
+| Trailing stop | dès +40 %, vend tout si le prix recule de 30 % depuis son plus haut |
+| Le dev vend | vente immédiate |
+| Ça ne décolle pas | vente si moins de +10 % après 15 min, ou si plus aucun échange depuis 5 min |
+| Perte du jour | plus d'achat si -35 % depuis minuit (UTC) |
+| Pertes d'affilée | pause de 2 h après 3 pertes |
+| Coupe-circuit | arrêt complet à -60 % depuis le plus haut (`/trading on` pour relancer) |
+| Wallet trop rempli | refuse de trader si le wallet contient plus de 0,5 SOL |
+
+### Ce que coûte chaque trade (impossible à éviter)
+
+- **Frais par ordre** : environ 1,25 % pour pump.fun et 0,5 % pour PumpPortal, soit
+  ~3,5 % pour un aller-retour.
+- **Frais réseau et priorité** : environ 0,0006 SOL par aller-retour. Sur une
+  position de 0,015 SOL (~2 $), ça fait encore ~4 %.
+- **Loyer du compte token** : ~0,002 SOL par nouveau token. Le bot le récupère en
+  fermant le compte après la vente ; si la fermeture échoue, il est perdu.
+
+Avec 7 $, chaque aller-retour coûte donc **~7-8 %** avant même de gagner quoi que
+ce soit. Le mode papier compte ces frais.
+
+### Passer en mode réel (seulement après des semaines de papier positif)
+
+1. Crée un **nouveau wallet** dans Phantom (« Ajouter un compte »), uniquement pour le bot.
+2. Envoie-lui le petit montant que tu acceptes de perdre (pas plus de 0,5 SOL).
+3. Exporte sa clé privée (Phantom → Paramètres → le compte → « Afficher la clé
+   privée ») et colle-la dans `.env` à `WALLET_PRIVATE_KEY`. **Nulle part ailleurs.**
+4. Dans `config.yaml`, mets `trading.mode: live`, puis relance le bot.
+
+En mode réel, PumpPortal construit la transaction et le bot la signe sur ta
+machine. Le bot vérifie que la transaction est bien pour ton wallet, mais tu fais
+quand même confiance à PumpPortal : c'est pour ça qu'il ne faut laisser que peu
+d'argent sur ce wallet.
+
+### Tout gratuit ?
+
+Le bot lui-même ne coûte rien. Telegram, le flux pump.fun de PumpPortal,
+Truth Social par RSS, les news RSS et le RPC Helius (offre gratuite) sont
+gratuits. Les seules dépenses sont les frais de trading ci-dessus, payés à
+pump.fun, à PumpPortal et au réseau Solana. Deux options sont payantes, à toi de
+voir : l'API X (sans elle, on suit Trump via Truth Social) et l'IA (sans elle, le
+bot utilise l'extraction de mots-clés).
+
+---
+
 ## Installation
 
 Il faut Python 3.11 ou plus récent.
@@ -93,6 +154,7 @@ python -m memebot --demo
 | `SOLANA_RPC_URL` | Conseillé | Compte gratuit chez Helius, QuickNode... | Gratuit (palier de base) |
 | `X_BEARER_TOKEN` | Pour suivre X | developer.x.com → ton app → « Bearer Token » | Payant à l'usage (vérifie la grille dans ta console X) |
 | `ANTHROPIC_API_KEY` | Non (IA) | console.anthropic.com | Payant à l'usage, quelques centimes par jour avec peu de posts |
+| `WALLET_PRIVATE_KEY` | Seulement en mode réel | Wallet **dédié** créé exprès (voir plus haut) | — |
 
 Pour Trump, pas besoin de l'API X : il poste surtout sur **Truth Social**, suivi
 via un flux RSS gratuit (voir `config.yaml`, vérifie que l'URL fonctionne).
@@ -119,6 +181,10 @@ avec `tmux`, `screen` ou un service `systemd`.
 | `/bilan` | Bilan paper trading des alertes |
 | `/status` | État du bot |
 | `/pause` · `/reprendre` | Coupe / remet les alertes |
+| `/trading` · `/trading on` · `/trading off` | État du trading, l'activer, le couper |
+| `/positions` | Positions ouvertes |
+| `/vendre tout` · `/vendre $TICKER` | Vente immédiate (bouton panique) |
+| `/journal` | Derniers trades et résultats |
 
 ## Lire une alerte
 
@@ -159,6 +225,10 @@ Nugget Nation ($NN)
 - La détection des snipers est approximative (heure de réception, pas le bloc).
 - Après la migration vers un AMM, le pool peut apparaître comme gros holder.
 - Aucun outil ne peut garantir qu'un token n'est pas une arnaque.
+- Le mode réel n'a été testé qu'avec des réponses simulées de PumpPortal et du RPC
+  Solana : vérifie les premières transactions sur Solscan avec de tout petits montants.
+- Un stop-loss ne protège pas d'un rug instantané : si le dev vend tout d'un coup,
+  le prix peut passer de +0 % à -90 % entre deux trades.
 
 ## Structure du code
 
@@ -172,6 +242,7 @@ memebot/
   pumpportal.py  websocket temps réel pump.fun
   sources/       X (API v2) et RSS
   ai.py          analyse des posts et avis sur les alertes (Claude)
+  trading/       trading auto : gestion du risque, exécution papier et réelle
   telegram.py    envoi des alertes et commandes
   report.py      mise en forme des messages
   storage.py     SQLite : tokens, alertes, bilan paper trading

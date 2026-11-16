@@ -11,6 +11,7 @@ import yaml
 from dotenv import load_dotenv
 
 from .risk import RiskThresholds
+from .trading.settings import TradingSettings
 
 DEFAULT_GENERIC = [
     "trump", "donald", "elon", "musk", "coin", "token", "sol", "solana", "pump", "moon",
@@ -69,6 +70,8 @@ class Settings:
     db_path: str = "memebot.db"
 
     risk: RiskThresholds = field(default_factory=RiskThresholds)
+    trading: TradingSettings = field(default_factory=TradingSettings)
+    wallet_secret: str | None = None  # clé privée du wallet dédié (mode réel uniquement)
 
     @property
     def ai_active(self) -> bool:
@@ -110,10 +113,15 @@ def load_settings(config_path: str | Path = "config.yaml", env_path: str | Path 
         for key, value in (raw.get("risk") or {}).items():
             if hasattr(s.risk, key) and value is not None:
                 setattr(s.risk, key, value)
+        for key, value in (raw.get("trading") or {}).items():
+            if hasattr(s.trading, key) and value is not None:
+                setattr(s.trading, key, value)
+        s.trading.mode = str(s.trading.mode).lower()
 
     s.telegram_token = os.getenv("TELEGRAM_BOT_TOKEN") or None
     s.telegram_chat_id = os.getenv("TELEGRAM_CHAT_ID") or None
     s.x_bearer = os.getenv("X_BEARER_TOKEN") or None
     s.rpc_url = os.getenv("SOLANA_RPC_URL") or s.rpc_url
+    s.wallet_secret = os.getenv("WALLET_PRIVATE_KEY") or None
     s.ai_available = bool(os.getenv("ANTHROPIC_API_KEY") or os.getenv("ANTHROPIC_AUTH_TOKEN"))
     return s
