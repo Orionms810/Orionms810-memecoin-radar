@@ -148,7 +148,9 @@ copy .env.example .env
 python -m memebot --demo
 ```
 
-Les fois suivantes : terminal dans le dossier, puis `.venv\Scripts\activate` et la commande voulue.
+Les fois suivantes : **double-clique sur `lancer-bot.bat`** dans le dossier du bot. Il active l'environnement et lance le bot (il fait aussi l'installation la première fois).
+
+Pour qu'il démarre tout seul avec Windows : `Win + R`, tape `shell:startup`, Entrée, puis fais clic droit → Nouveau → Raccourci vers `lancer-bot.bat`.
 
 ### Mac / Linux
 
