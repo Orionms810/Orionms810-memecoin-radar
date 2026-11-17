@@ -10,9 +10,8 @@ import time
 from collections import deque
 from dataclasses import dataclass, field
 from html import escape
-from typing import Any, Awaitable, Protocol
+from typing import TYPE_CHECKING, Any, Awaitable, Protocol
 
-from .ai import AIAnalyst
 from .config import Settings
 from .models import (
     CreatorInfo,
@@ -41,6 +40,9 @@ from .risk import assess_risk, momentum_score
 from .storage import Storage
 from .telegram import Notifier
 from .text import extract_keywords, manual_keywords
+
+if TYPE_CHECKING:  # l'IA est optionnelle (module anthropic)
+    from .ai import AIAnalyst
 
 log = logging.getLogger(__name__)
 MINT_RE = re.compile(r"^[1-9A-HJ-NP-Za-km-z]{32,44}$")

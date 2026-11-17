@@ -1,0 +1,6 @@
+# Installation légère : petits appareils (Raspberry Pi Zero 32 bits...).
+# Tout marche (radar, alertes Telegram, /check, trading PAPIER) sauf l'IA et le trading RÉEL.
+httpx>=0.28,<1
+websockets>=15,<18
+python-dotenv>=1.0
+feedparser>=6.0

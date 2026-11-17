@@ -175,7 +175,7 @@ class FakeAI:
 
 
 async def test_ai_silences_routine_posts(setup):
-    from memebot.ai import NarrativeAnalysis
+    NarrativeAnalysis = pytest.importorskip("memebot.ai").NarrativeAnalysis
     engine, notifier, feed, data = setup
     engine.ai = FakeAI(NarrativeAnalysis(memeable=False, hype_score=5, keywords=[], tickers=[],
                                          crypto_direct=False, summary_fr="banal"))
@@ -185,7 +185,7 @@ async def test_ai_silences_routine_posts(setup):
 
 
 async def test_ai_announces_viral_posts_and_reviews_alerts(setup):
-    from memebot.ai import NarrativeAnalysis
+    NarrativeAnalysis = pytest.importorskip("memebot.ai").NarrativeAnalysis
     engine, notifier, feed, data = setup
     engine.ai = FakeAI(NarrativeAnalysis(memeable=True, hype_score=85, keywords=["hamster nugget"],
                                          tickers=["HNUG"], crypto_direct=False, summary_fr="viral"))

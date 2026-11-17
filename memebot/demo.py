@@ -27,7 +27,7 @@ from .models import (
 )
 from .storage import Storage
 from .telegram import Notifier, strip_tags
-from .trading.executor import PaperExecutor
+from .trading.paper import PaperExecutor
 from .trading.settings import TradingSettings
 from .trading.trader import Trader
 

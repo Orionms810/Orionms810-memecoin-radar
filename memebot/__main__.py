@@ -14,7 +14,6 @@ import sys
 
 import httpx
 
-from .ai import AIAnalyst
 from .config import Settings, load_settings
 from .data import LiveData
 from .engine import Engine
@@ -23,7 +22,7 @@ from .sources.rss import Feed, RSSSource
 from .sources.x_api import XAccount, XSource
 from .storage import Storage
 from .telegram import Notifier, strip_tags
-from .trading.executor import LiveExecutor, PaperExecutor, load_keypair
+from .trading.paper import PaperExecutor
 from .trading.trader import Trader
 
 log = logging.getLogger("memebot")
@@ -41,7 +40,13 @@ def build_live(settings: Settings, http: httpx.AsyncClient) -> tuple[Engine, Not
     notifier = Notifier(http, settings.telegram_token, settings.telegram_chat_id)
     data = LiveData(http, settings.rpc_url, ipfs_gateway=settings.ipfs_gateway,
                     use_pumpfun_api=settings.use_pumpfun_api, use_rugcheck=settings.use_rugcheck)
-    ai = AIAnalyst(settings.ai_model, settings.ai_effort) if settings.ai_active else None
+    ai = None
+    if settings.ai_active:
+        try:
+            from .ai import AIAnalyst
+            ai = AIAnalyst(settings.ai_model, settings.ai_effort)
+        except ImportError:
+            log.warning("IA désactivée : module « anthropic » non installé sur cet appareil.")
     engine = Engine(settings, Storage(settings.db_path), notifier, data, None, ai)
     return engine, notifier
 
@@ -68,6 +73,12 @@ async def build_trader(settings: Settings, engine: Engine, http: httpx.AsyncClie
         log.info("Trading automatique désactivé (trading.mode: %s)", ts.mode)
         return None
     if ts.mode == "live":
+        try:
+            from .trading.executor import LiveExecutor, load_keypair
+        except ImportError:
+            log.error("Mode réel impossible : module « solders » non installé sur cet appareil "
+                      "(installation légère ?). Trading désactivé.")
+            return None
         if not settings.wallet_secret:
             log.error("trading.mode = live mais WALLET_PRIVATE_KEY est vide : trading désactivé.")
             return None
