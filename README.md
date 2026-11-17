@@ -167,6 +167,31 @@ python -m memebot --demo
 
 La démo ne demande aucune clé ni connexion.
 
+### Serveur gratuit 24 h/24 (Google Cloud)
+
+1. Crée une VM **e2-micro** (offre gratuite) : région **us-central1**, **us-east1** ou
+   **us-west1**, système **Debian 12**, disque **« Standard persistent disk »** de 30 Go
+   maximum, sans adresse IP statique.
+2. Clique sur **SSH** à côté de la VM : un terminal s'ouvre dans le navigateur.
+3. Colle cette commande :
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Orionms810/Orionms810-memecoin-radar/claude/memecoin-trading-bot-pumpfun-jbsdzq/deploy/install-serveur.sh | bash
+```
+
+4. Remplis `.env` (`nano ~/memecoin-radar/.env`), puis `sudo systemctl restart memebot`.
+
+Commandes utiles sur le serveur :
+
+| Commande | Effet |
+|---|---|
+| `journalctl -u memebot -f` | Logs en direct (Ctrl + C pour quitter) |
+| `sudo systemctl restart memebot` | Redémarre le bot |
+| `sudo systemctl stop memebot` | Arrête le bot |
+| `bash ~/memecoin-radar/deploy/mettre-a-jour.sh` | Installe la dernière version |
+
+⚠️ Ne fais pas tourner le bot à deux endroits en même temps avec le même token Telegram.
+
 ## Les clés à mettre dans `.env`
 
 | Clé | Obligatoire ? | Où l'obtenir | Prix |
