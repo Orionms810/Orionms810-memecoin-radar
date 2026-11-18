@@ -55,12 +55,15 @@ HELP = """🤖 <b>Memecoin Radar</b> — commandes
 /bilan — bilan « paper trading » des alertes
 /status — état du bot
 /pause · /reprendre — couper / remettre les alertes
+<b>Chaînes Telegram</b> (tweets d'Elon, Trump... republiés)
+/chaine @nom [poids] — suivre une chaîne · /chaines — liste · /retirer @nom
 <b>Trading auto</b>
 /trading — état · /trading on · /trading off
 /positions — positions ouvertes
 /vendre tout · /vendre $TICKER — vente immédiate
 /journal — derniers trades"""
 TRADING_COMMANDS = {"/trading", "/positions", "/vendre", "/journal"}
+CHANNEL_COMMANDS = {"/chaines", "/chaine", "/retirer"}
 
 
 class DataProvider(Protocol):
@@ -124,6 +127,7 @@ class Engine:
         self.alerts_sent = 0
         self.sol_usd: float | None = None
         self.trader: Any = None  # trading.trader.Trader si le trading est activé
+        self.tg_channels: Any = None  # sources.telegram_channels si configuré
 
     # ------------------------------------------------------------- utilitaires
     def spawn(self, coro: Awaitable[Any]) -> asyncio.Task:
@@ -156,7 +160,7 @@ class Engine:
         # Le matching démarre tout de suite ; seule l'annonce attend l'avis de l'IA
         # (sinon chaque post banal d'un gros compte déclencherait un message).
         self._retro_match(narr)
-        important = ev.weight >= self.s.notify_narrative_min_weight
+        important = self._important(ev)
         if ev.source == "manual":
             pass
         elif self.ai:
@@ -165,9 +169,14 @@ class Engine:
             await self.notifier.send(format_narrative(narr))
         return narr
 
+    def _important(self, ev: NewsEvent) -> bool:
+        if ev.announce is not None:
+            return ev.announce
+        return ev.weight >= self.s.notify_narrative_min_weight
+
     async def _ai_enrich(self, narr: Narrative) -> None:
         assert self.ai is not None
-        important = narr.event.weight >= self.s.notify_narrative_min_weight
+        important = self._important(narr.event)
         res = await self.ai.analyze_event(narr.event)
         if res is None:  # IA indisponible : on se rabat sur le poids de la source
             if important:
@@ -433,6 +442,11 @@ class Engine:
             return "🔔 Alertes réactivées."
         if cmd == "/bilan":
             return format_paper_stats(self.storage.paper_stats())
+        if cmd in CHANNEL_COMMANDS:
+            if not self.tg_channels:
+                return ("Chaînes Telegram non configurées : ajoute TG_API_ID et TG_API_HASH dans "
+                        ".env, lance « python -m memebot telegram-login », puis relance le bot.")
+            return await self.tg_channels.handle_command(cmd, arg)
         if cmd in TRADING_COMMANDS:
             if not self.trader:
                 return 'Trading désactivé (mode = "off" dans config.toml, section [trading]).'

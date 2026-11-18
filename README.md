@@ -69,6 +69,31 @@ réel est désactivé tant que tu ne l'actives pas toi-même.
 
 ---
 
+## 📺 Lire les tweets gratuitement (chaînes Telegram)
+
+L'API X est payante. À la place, le bot peut lire des **chaînes Telegram publiques
+qui republient les tweets** (Elon Musk, Trump...) en quelques secondes, avec ton
+compte Telegram. C'est gratuit.
+
+1. Va sur **https://my.telegram.org**, connecte-toi, ouvre **« API development
+   tools »** et crée une application (nom et description au choix). Copie
+   **api_id** et **api_hash** dans `.env` (`TG_API_ID=` et `TG_API_HASH=`).
+2. Une seule fois, dans le dossier du bot : `python -m memebot telegram-login`.
+   Entre ton numéro, puis le code reçu dans Telegram.
+3. Relance le bot, puis envoie-lui `/chaine @nom_de_la_chaine` pour chaque chaîne
+   à suivre. Le bot rejoint la chaîne et analyse chaque nouveau message.
+   `/chaines` liste les chaînes, `/retirer @nom` en enlève une.
+
+- Choisis des chaînes qui postent **vite** et **seulement** les tweets (pas de pubs).
+- Les messages de ces chaînes ne sont **pas annoncés un par un** : tu reçois une
+  alerte seulement quand un token correspond.
+- ⚠️ Le fichier `telegram.session` et les clés `TG_API_*` donnent accès à ton
+  compte Telegram : ne les partage jamais. Le bot ignore tes conversations privées.
+- Sur le serveur : même chose, `cd ~/memecoin-radar && .venv/bin/python -m memebot
+  telegram-login`, puis `sudo systemctl restart memebot`.
+
+---
+
 ## 🤖 Trading automatique
 
 Quand une alerte passe des filtres **plus stricts** (sécurité ≥ 60, momentum ≥ 30,
@@ -232,6 +257,8 @@ avec `tmux`, `screen` ou un service `systemd`.
 | `/positions` | Positions ouvertes |
 | `/vendre tout` · `/vendre $TICKER` | Vente immédiate (bouton panique) |
 | `/journal` | Derniers trades et résultats |
+| `/chaine @nom [poids]` | Suivre une chaîne Telegram (tweets republiés) |
+| `/chaines` · `/retirer @nom` | Chaînes suivies / en retirer une |
 
 ## Lire une alerte
 

@@ -9,3 +9,7 @@
 venv/
 __pycache__/
 .pytest_cache/
+
+# Session Telegram : donne accès à ton compte, ne jamais la publier
+*.session
+*.session-journal

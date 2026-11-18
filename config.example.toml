@@ -45,6 +45,22 @@ name = "BBC World"
 url = "https://feeds.bbci.co.uk/news/world/rss.xml"
 weight = 0.3
 
+[telegram_channels]
+# Chaînes Telegram publiques qui republient les tweets (Elon, Trump...). Gratuit.
+# Nécessite TG_API_ID / TG_API_HASH dans .env + « python -m memebot telegram-login ».
+# Le plus simple : ajoute les chaînes depuis Telegram avec /chaine @nom (pas besoin de toucher ici).
+enabled = true
+join = true                 # rejoint les chaînes (obligatoire pour recevoir les messages en direct)
+session = "telegram"        # fichier telegram.session : NE LE PARTAGE JAMAIS
+
+# Exemple (remplace par une vraie chaîne que tu as vérifiée) :
+# [[telegram_channels.channels]]
+# handle = "@nom_de_la_chaine"
+# label = "Elon Musk (via Telegram)"
+# weight = 0.9
+# aliases = ["elon", "musk"]
+# announce = false          # true = message Telegram à chaque post (spam si la chaîne poste beaucoup)
+
 [narratives]
 ttl_minutes = 45            # durée de vie d'un narratif (doublée si l'IA le juge très fort)
 # Mots trop courants sur pump.fun : ils comptent beaucoup moins dans le matching.

@@ -24,6 +24,7 @@ class NewsEvent:
     url: str = ""
     weight: float = 0.5  # importance de la source (0..1)
     aliases: tuple[str, ...] = ()  # mots trop liés à l'auteur (ex: "trump")
+    announce: bool | None = None  # annoncer le narratif ? (None = selon le poids de la source)
     created_at: float = field(default_factory=time.time)
 
 

@@ -14,7 +14,7 @@ from .risk import RiskThresholds
 from .trading.settings import TradingSettings
 
 DEFAULT_GENERIC = [
-    "trump", "donald", "elon", "musk", "coin", "token", "sol", "solana", "pump", "moon",
+    "trump", "donald", "elon", "musk", "elonmusk", "donaldtrump", "realdonaldtrump", "tweet", "coin", "token", "sol", "solana", "pump", "moon",
     "meme", "memecoin", "crypto", "bitcoin", "btc", "eth", "official", "the", "inu", "usa",
     "america", "american", "president", "news", "world", "people", "great", "today",
 ]
@@ -73,6 +73,14 @@ class Settings:
     trading: TradingSettings = field(default_factory=TradingSettings)
     wallet_secret: str | None = None  # clé privée du wallet dédié (mode réel uniquement)
 
+    # chaînes Telegram (compte utilisateur via Telethon)
+    tg_api_id: int | None = None
+    tg_api_hash: str | None = None
+    tg_enabled: bool = True
+    tg_join: bool = True
+    tg_session: str = "telegram"
+    tg_channels: list[dict[str, Any]] = field(default_factory=list)
+
     @property
     def ai_active(self) -> bool:
         return self.ai_enabled and self.ai_available
@@ -94,6 +102,8 @@ SECTIONS = {
                "rug_drop_alert_pct": "rug_drop_alert_pct"},
     "ai": {"enabled": "ai_enabled", "model": "ai_model", "effort": "ai_effort",
            "min_hype": "ai_min_hype", "review_alerts": "ai_review_alerts"},
+    "telegram_channels": {"enabled": "tg_enabled", "join": "tg_join", "session": "tg_session",
+                          "channels": "tg_channels"},
     "data": {"ipfs_gateway": "ipfs_gateway", "use_pumpfun_api": "use_pumpfun_api",
              "use_rugcheck": "use_rugcheck", "db_path": "db_path"},
 }
@@ -139,5 +149,10 @@ def load_settings(config_path: str | Path = "config.toml", env_path: str | Path 
     s.x_bearer = os.getenv("X_BEARER_TOKEN") or None
     s.rpc_url = os.getenv("SOLANA_RPC_URL") or s.rpc_url
     s.wallet_secret = os.getenv("WALLET_PRIVATE_KEY") or None
+    tg_id = (os.getenv("TG_API_ID") or "").strip()
+    s.tg_api_id = int(tg_id) if tg_id.isdigit() else None
+    s.tg_api_hash = (os.getenv("TG_API_HASH") or "").strip() or None
+    # Les mots génériques par défaut s'ajoutent toujours à ceux de config.toml.
+    s.generic_keywords = sorted(set(DEFAULT_GENERIC) | {str(g) for g in s.generic_keywords})
     s.ai_available = bool(os.getenv("ANTHROPIC_API_KEY") or os.getenv("ANTHROPIC_AUTH_TOKEN"))
     return s

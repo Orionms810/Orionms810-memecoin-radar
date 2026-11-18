@@ -3,6 +3,7 @@
     python -m memebot              # mode réel
     python -m memebot --demo       # démo hors-ligne
     python -m memebot check <mint> # analyse d'un token dans le terminal
+    python -m memebot telegram-login  # connexion unique pour lire des chaînes Telegram
 """
 
 from __future__ import annotations
@@ -19,6 +20,7 @@ from .data import LiveData
 from .engine import Engine
 from .pumpportal import PumpPortalClient
 from .sources.rss import Feed, RSSSource
+from .sources.telegram_channels import ChannelCfg, TelegramChannelsSource, normalize_handle
 from .sources.x_api import XAccount, XSource
 from .storage import Storage
 from .telegram import Notifier, strip_tags
@@ -63,7 +65,28 @@ def startup_warnings(s: Settings) -> list[str]:
         w.append("IA désactivée (pas d'ANTHROPIC_API_KEY) : extraction de mots-clés heuristique.")
     if "api.mainnet-beta.solana.com" in s.rpc_url:
         w.append("RPC Solana public : lent et limité. Prends une clé gratuite (Helius, etc.) pour SOLANA_RPC_URL.")
+    if (s.tg_channels and s.tg_enabled) and not (s.tg_api_id and s.tg_api_hash):
+        w.append("Chaînes Telegram configurées mais TG_API_ID / TG_API_HASH vides dans .env.")
     return w
+
+
+def build_channels(settings: Settings, engine: Engine) -> TelegramChannelsSource | None:
+    if not (settings.tg_enabled and settings.tg_api_id and settings.tg_api_hash):
+        return None
+    channels = []
+    for c in settings.tg_channels:
+        handle = normalize_handle(str(c.get("handle") or c.get("username") or ""))
+        if not handle:
+            log.warning("Chaîne Telegram invalide dans config.toml : %r", c)
+            continue
+        channels.append(ChannelCfg(username=handle, label=str(c.get("label") or ""),
+                                   weight=float(c.get("weight", 0.8)),
+                                   aliases=tuple(c.get("aliases") or ()),
+                                   announce=bool(c.get("announce", False))))
+    src = TelegramChannelsSource(settings.tg_api_id, settings.tg_api_hash, settings.tg_session,
+                                 channels, engine.on_event, engine.storage, join=settings.tg_join)
+    engine.tg_channels = src
+    return src
 
 
 async def build_trader(settings: Settings, engine: Engine, http: httpx.AsyncClient,
@@ -140,6 +163,9 @@ async def run_live(settings: Settings) -> None:
                                    already_seen=engine.storage.event_seen).run())
         if settings.telegram_token:
             coros.append(notifier.poll_commands(engine.handle_command))
+        channels = build_channels(settings, engine)
+        if channels:
+            coros.append(channels.run())
 
         for w in startup_warnings(settings):
             log.warning(w)
@@ -164,7 +190,7 @@ async def run_check(settings: Settings, mint: str) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="memebot", description="Radar à memecoins pump.fun")
-    parser.add_argument("command", nargs="?", default="run", choices=["run", "check"])
+    parser.add_argument("command", nargs="?", default="run", choices=["run", "check", "telegram-login"])
     parser.add_argument("mint", nargs="?", help="adresse du token pour « check »")
     parser.add_argument("--demo", action="store_true", help="démo hors-ligne")
     parser.add_argument("--config", default="config.toml")
@@ -179,6 +205,14 @@ def main(argv: list[str] | None = None) -> int:
             asyncio.run(run_demo())
             return 0
         settings = load_settings(args.config, args.env)
+        if args.command == "telegram-login":
+            if not (settings.tg_api_id and settings.tg_api_hash):
+                parser.error("remplis d'abord TG_API_ID et TG_API_HASH dans .env "
+                             "(clé gratuite sur https://my.telegram.org)")
+            from .sources.telegram_channels import interactive_login
+            asyncio.run(interactive_login(settings.tg_api_id, settings.tg_api_hash,
+                                          settings.tg_session))
+            return 0
         if args.command == "check":
             if not args.mint:
                 parser.error("donne l'adresse du token : python -m memebot check <mint>")
