@@ -16,6 +16,7 @@ from typing import Any
 
 from .config import Settings
 from .engine import Engine
+from .funding import FundingInfo
 from .models import (
     DexInfo,
     HolderInfo,
@@ -44,6 +45,7 @@ class FakeData:
         self.holders_by_mint: dict[str, HolderInfo] = {}
         self.meta_by_uri: dict[str, TokenMetadata] = {}
         self.rug_by_mint: dict[str, RugcheckInfo] = {}
+        self.funding_by_creator: dict[str, FundingInfo] = {}
 
     async def metadata(self, uri: str) -> TokenMetadata | None:
         return self.meta_by_uri.get(uri)
@@ -66,6 +68,9 @@ class FakeData:
 
     async def sol_usd(self) -> float | None:
         return 150.0
+
+    async def funding(self, buyers: list[str], *, creator: str | None = None) -> FundingInfo | None:
+        return self.funding_by_creator.get(creator or "")
 
 
 class FakeFeed:
@@ -138,6 +143,10 @@ async def run_demo() -> None:
     snipe = make_token("Nugget Nation", "NN", fake_address("dev-snipe"), 4.0)
     data.meta_by_uri[snipe.uri] = TokenMetadata(description="nugget nation")
     data.holders_by_mint[snipe.mint] = HolderInfo(34.0, 9.0, fake_address("w2"), 4.0, 20)
+    # Les 9 « acheteurs » de Nugget Nation ont tous été financés par le créateur : faux acheteurs
+    data.funding_by_creator[snipe.creator] = FundingInfo(
+        analyzed=8, fresh=8, max_shared=8, shared_funder=snipe.creator, linked_to_creator=8,
+        shared_is_creator_source=True)
 
     unrelated = make_token("Random Pepe", "RPEPE", fake_address("dev-pepe"), 1.0)
 

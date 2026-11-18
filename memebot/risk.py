@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from .funding import FundingInfo
 from .models import (
     CreatorInfo,
     HolderInfo,
@@ -30,6 +31,10 @@ class RiskThresholds:
     snipers_danger: int = 8
     serial_warn: int = 1  # AUTRES tokens lancés par le même créateur en 24 h
     serial_danger: int = 3
+    shared_funder_warn: int = 2  # premiers acheteurs financés par le même wallet
+    shared_funder_danger: int = 3
+    fresh_ratio_warn: float = 0.7  # part des premiers acheteurs qui sont des wallets neufs
+    creator_linked_critical: int = 3  # acheteurs liés au créateur : au-delà, refus direct
 
 
 def assess_risk(
@@ -41,6 +46,7 @@ def assess_risk(
     creator: CreatorInfo | None,
     metadata: TokenMetadata | None,
     th: RiskThresholds | None = None,
+    funding: FundingInfo | None = None,
 ) -> RiskReport:
     """Score de sécurité 0..100 + liste des signaux (ok / warn / danger / critical)."""
     th = th or RiskThresholds()
@@ -113,6 +119,33 @@ def assess_risk(
         if stats.max_mcap > 0 and stats.last_mcap < 0.6 * stats.max_mcap:
             drop = (1 - stats.last_mcap / stats.max_mcap) * 100
             flag("warn", f"Déjà -{drop:.0f}% depuis le plus haut", 10)
+
+    # 5 bis. Faux acheteurs : d'où vient l'argent des premiers acheteurs ?
+    if funding and funding.analyzed:
+        n, total = funding.linked_to_creator, funding.analyzed
+        suspicious = False
+        if n:
+            suspicious = True
+            text = (f"{n} des {total} premiers acheteurs financés par le créateur ou par "
+                    "la même source que lui (faux acheteurs)")
+            if n >= th.creator_linked_critical:
+                critical = True  # arnaque quasi certaine : éliminatoire
+                flag("critical", text, 40)
+            else:
+                flag("danger", text, 30 if n >= 2 else 20)
+        if not (n and funding.shared_is_creator_source):
+            if funding.max_shared >= th.shared_funder_danger:
+                suspicious = True
+                flag("danger", f"{funding.max_shared} des {total} premiers acheteurs financés par "
+                               "le même wallet (bundle probable)", 25)
+            elif funding.max_shared >= th.shared_funder_warn:
+                suspicious = True
+                flag("warn", f"{funding.max_shared} premiers acheteurs financés par le même wallet", 8)
+        if total >= 4 and funding.fresh_ratio >= th.fresh_ratio_warn:
+            suspicious = True
+            flag("warn", f"{funding.fresh_ratio:.0%} des premiers acheteurs sont des wallets tout neufs", 10)
+        if not suspicious:
+            flag("ok", f"Premiers acheteurs : financements indépendants ({total} vérifiés)")
 
     # 6. Réseaux sociaux
     if metadata is not None:

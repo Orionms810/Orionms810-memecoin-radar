@@ -97,6 +97,10 @@ review_alerts = true        # l'IA ajoute un avis sous chaque alerte
 use_pumpfun_api = true      # API non officielle pump.fun (historique du créateur)
 use_rugcheck = true
 db_path = "memebot.db"
+funding_check = true        # remonte d'où vient l'argent des premiers acheteurs (faux acheteurs)
+funding_wallets = 8         # premiers acheteurs vérifiés par token (~3 requêtes RPC chacun)
+funding_exchange_sol = 5000 # un financeur avec plus que ça = plateforme d'échange, ignoré
+# ignore_funders = ["adresse1", "adresse2"]   # financeurs à ignorer (ex : un exchange précis)
 
 [risk]
 dev_buy_warn = 5            # % de la supply achetée par le dev au lancement
@@ -109,6 +113,10 @@ snipers_warn = 4            # wallets qui achètent dans les 2 premières second
 snipers_danger = 8
 serial_warn = 1             # autres tokens lancés par le même créateur en 24 h
 serial_danger = 3
+shared_funder_warn = 2      # premiers acheteurs financés par le même wallet
+shared_funder_danger = 3
+fresh_ratio_warn = 0.7      # part des premiers acheteurs qui sont des wallets tout neufs
+creator_linked_critical = 3 # acheteurs financés par le créateur : à partir de 3, refus direct
 
 [trading]
 # "off"   = pas de trading automatique

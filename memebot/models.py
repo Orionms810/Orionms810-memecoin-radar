@@ -148,6 +148,7 @@ class TradeStats:
     buyers: set[str] = field(default_factory=set)
     sellers: set[str] = field(default_factory=set)
     early_buyers: set[str] = field(default_factory=set)
+    first_buyers: list[str] = field(default_factory=list)  # dans l'ordre, sans le créateur
     creator_sold: bool = False
     creator_sold_sol: float = 0.0
     creator_balance: float | None = None
@@ -168,6 +169,9 @@ class TradeStats:
 
     def apply(self, t: Trade, early_window: float = 2.0) -> None:
         if t.is_buy:
+            if (t.trader not in self.buyers and t.trader != self.creator
+                    and len(self.first_buyers) < 20):
+                self.first_buyers.append(t.trader)
             self.buys += 1
             self.buy_sol += t.sol_amount
             self.buyers.add(t.trader)

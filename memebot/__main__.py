@@ -41,7 +41,9 @@ def setup_logging(verbose: bool) -> None:
 def build_live(settings: Settings, http: httpx.AsyncClient) -> tuple[Engine, Notifier]:
     notifier = Notifier(http, settings.telegram_token, settings.telegram_chat_id)
     data = LiveData(http, settings.rpc_url, ipfs_gateway=settings.ipfs_gateway,
-                    use_pumpfun_api=settings.use_pumpfun_api, use_rugcheck=settings.use_rugcheck)
+                    use_pumpfun_api=settings.use_pumpfun_api, use_rugcheck=settings.use_rugcheck,
+                    funding_exchange_sol=settings.funding_exchange_sol,
+                    ignore_funders=settings.ignore_funders)
     ai = None
     if settings.ai_active:
         try:

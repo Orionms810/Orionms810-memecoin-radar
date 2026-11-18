@@ -64,6 +64,7 @@ class CandidateJournal:
         now = now or time.time()
         mcap = (stats.last_mcap if stats and stats.last_mcap else token.market_cap_sol) or 0.0
         holders = getattr(report, "holders", None)
+        funding = getattr(report, "funding", None)
         row = {
             "created_at": now,
             "mint": token.mint,
@@ -86,6 +87,10 @@ class CandidateJournal:
             "mcap_eval": mcap,
             "max_mcap_30": mcap,
             "creator_sold_30": int(bool(stats and stats.creator_sold)),
+            "funding_checked": funding.analyzed if funding else None,
+            "funding_shared": funding.max_shared if funding else None,
+            "funding_creator": funding.linked_to_creator if funding else None,
+            "funding_fresh_pct": round(funding.fresh_ratio * 100) if funding else None,
         }
         row_id = self.storage.add_candidate(row)
         if mcap > 0 and len(self.tracked) < self.max_tracked:

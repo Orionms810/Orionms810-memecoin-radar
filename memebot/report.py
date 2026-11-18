@@ -18,6 +18,7 @@ from .models import (
     TokenMetadata,
     TradeStats,
 )
+from .funding import FundingInfo
 from .narratives import MatchResult
 
 ICONS = {"ok": "✅", "warn": "⚠️", "danger": "⛔", "critical": "🚨"}
@@ -36,6 +37,7 @@ class TokenReport:
     rugcheck: RugcheckInfo | None = None
     creator: CreatorInfo | None = None
     dex: DexInfo | None = None
+    funding: FundingInfo | None = None
     sol_usd: float | None = None
     copies: int = 0  # autres tokens qui copient le même narratif
     rank: int = 1  # rang par volume parmi les copies
@@ -67,6 +69,11 @@ class TokenReport:
                             "market_cap_sol_max": round(s.max_mcap, 1),
                             "creator_sold": s.creator_sold,
                             "bonding_curve_progress_pct": s.curve_progress}
+        if self.funding:
+            d["first_buyers_funding"] = {
+                "checked": self.funding.analyzed, "fresh_wallets": self.funding.fresh,
+                "max_funded_by_same_wallet": self.funding.max_shared,
+                "linked_to_creator": self.funding.linked_to_creator}
         if self.metadata:
             d["description"] = self.metadata.description[:300]
             d["socials"] = self.metadata.socials

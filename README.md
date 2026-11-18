@@ -48,7 +48,8 @@ réel est désactivé tant que tu ne l'actives pas toi-même.
                        observe les trades 20 s ◄─────────┘
                                 │
      contrôles anti-rug : achat du dev, créateur en série, top holders,
-     snipers/bundle, RugCheck, réseaux sociaux, dev qui vend...
+     snipers, faux acheteurs financés par le créateur, RugCheck, réseaux sociaux,
+     dev qui vend...
                                 │
             alerte Telegram ──► suivi 30 min : « le dev vend ! », « -50 % »
                                 │

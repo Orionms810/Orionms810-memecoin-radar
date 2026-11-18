@@ -78,6 +78,7 @@ class DataProvider(Protocol):
     async def creator_launch_count(self, creator: str) -> int | None: ...
     async def pump_coin(self, mint: str) -> dict[str, Any] | None: ...
     async def dexscreener(self, mint: str) -> DexInfo | None: ...
+    async def funding(self, buyers: list[str], *, creator: str | None = None) -> Any: ...
     async def sol_usd(self) -> float | None: ...
 
 
@@ -277,12 +278,15 @@ class Engine:
         exclude = {token.bonding_curve} if token.bonding_curve else set()
         if dex and dex.pair_address:
             exclude.add(dex.pair_address)
-        meta, holders, rug, api_count = await asyncio.gather(
+        buyers = (stats.first_buyers[: self.s.funding_wallets]
+                  if stats and self.s.funding_check else [])
+        meta, holders, rug, api_count, funding = await asyncio.gather(
             _safe(self.data.metadata(token.uri), 6) if token.uri else _none(),
             _safe(self.data.holders(token.mint, exclude_owners=exclude,
                                     creator=token.creator or None), 12),
             _safe(self.data.rugcheck(token.mint), 8),
             _safe(self.data.creator_launch_count(token.creator), 6) if token.creator else _none(),
+            _safe(self.data.funding(buyers, creator=token.creator or None), 15) if buyers else _none(),
         )
         creator = None
         if token.creator:
@@ -293,11 +297,11 @@ class Engine:
         risk = assess_risk(
             dev_buy_pct=token.dev_buy_pct if dev_buy_known else None,
             stats=stats, holders=holders, rugcheck=rug, creator=creator,
-            metadata=meta, th=self.s.risk,
+            metadata=meta, th=self.s.risk, funding=funding,
         )
         return TokenReport(token=token, risk=risk, momentum=momentum_score(stats), match=match,
                            stats=stats, metadata=meta, holders=holders, rugcheck=rug,
-                           creator=creator, dex=dex, sol_usd=self.sol_usd)
+                           creator=creator, dex=dex, funding=funding, sol_usd=self.sol_usd)
 
     def _copies_rank(self, cand: Candidate) -> tuple[int, int]:
         narr = cand.match.narrative

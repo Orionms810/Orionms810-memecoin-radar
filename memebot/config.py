@@ -67,6 +67,10 @@ class Settings:
     ipfs_gateway: str | None = None
     use_pumpfun_api: bool = True
     use_rugcheck: bool = True
+    funding_check: bool = True  # remonter d'où vient l'argent des premiers acheteurs
+    funding_wallets: int = 8  # nombre de premiers acheteurs vérifiés par token
+    funding_exchange_sol: float = 5000.0  # au-delà de ce solde, un financeur = plateforme d'échange
+    ignore_funders: list[str] = field(default_factory=list)
     db_path: str = "memebot.db"
 
     risk: RiskThresholds = field(default_factory=RiskThresholds)
@@ -105,7 +109,9 @@ SECTIONS = {
     "telegram_channels": {"enabled": "tg_enabled", "join": "tg_join", "session": "tg_session",
                           "channels": "tg_channels"},
     "data": {"ipfs_gateway": "ipfs_gateway", "use_pumpfun_api": "use_pumpfun_api",
-             "use_rugcheck": "use_rugcheck", "db_path": "db_path"},
+             "use_rugcheck": "use_rugcheck", "db_path": "db_path",
+             "funding_check": "funding_check", "funding_wallets": "funding_wallets",
+             "funding_exchange_sol": "funding_exchange_sol", "ignore_funders": "ignore_funders"},
 }
 
 

@@ -14,6 +14,7 @@ from typing import Any
 
 import httpx
 
+from .funding import FundingInfo, FundingTracer
 from .models import DexInfo, HolderInfo, RugcheckInfo, TokenMetadata
 
 log = logging.getLogger(__name__)
@@ -35,6 +36,8 @@ class LiveData:
         ipfs_gateway: str | None = None,
         use_pumpfun_api: bool = True,
         use_rugcheck: bool = True,
+        funding_exchange_sol: float = 5000.0,
+        ignore_funders: tuple[str, ...] | list[str] = (),
     ):
         self.http = http
         self.rpc_url = rpc_url
@@ -43,6 +46,8 @@ class LiveData:
         self.use_rugcheck = use_rugcheck
         self._sol_usd: tuple[float, float] | None = None  # (prix, timestamp)
         self._rpc_id = 0
+        self.funding_tracer = FundingTracer(self._rpc, exchange_balance_sol=funding_exchange_sol,
+                                            ignore=tuple(ignore_funders))
 
     # ------------------------------------------------------------------ utils
     async def _get_json(self, url: str, timeout: float = 6.0, **kw: Any) -> Any:
@@ -139,6 +144,10 @@ class LiveData:
             creator_pct=creator_pct,
             accounts_checked=len(accounts),
         )
+
+    # ------------------------------------------------------ faux acheteurs
+    async def funding(self, buyers: list[str], *, creator: str | None = None) -> FundingInfo | None:
+        return await self.funding_tracer.analyze(buyers, creator)
 
     # --------------------------------------------------------------- rugcheck
     async def rugcheck(self, mint: str) -> RugcheckInfo | None:

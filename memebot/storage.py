@@ -45,7 +45,15 @@ class Storage:
         self.db.row_factory = sqlite3.Row
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.executescript(SCHEMA)
+        self._migrate()
         self.db.commit()
+
+    def _migrate(self) -> None:
+        """Ajoute les colonnes apparues dans les nouvelles versions (bases existantes)."""
+        existing = {row[1] for row in self.db.execute("PRAGMA table_info(candidates)")}
+        for col, kind in self.ADDED_CANDIDATE_COLUMNS:
+            if col not in existing:
+                self.db.execute(f"ALTER TABLE candidates ADD COLUMN {col} {kind}")
 
     def close(self) -> None:
         self.db.close()
@@ -182,7 +190,10 @@ class Storage:
         "created_at", "mint", "symbol", "name", "narrative", "source", "match_score", "safety",
         "momentum", "dev_buy_pct", "top10_pct", "early_buyers", "buyers", "buy_sol", "sell_sol",
         "age_s", "decision", "detail", "mcap_eval", "mcap_5", "mcap_15", "mcap_30", "max_mcap_30",
-        "creator_sold_30", "traded", "trade_detail")
+        "creator_sold_30", "traded", "trade_detail",
+        "funding_checked", "funding_shared", "funding_creator", "funding_fresh_pct")
+    ADDED_CANDIDATE_COLUMNS = (("funding_checked", "INTEGER"), ("funding_shared", "INTEGER"),
+                               ("funding_creator", "INTEGER"), ("funding_fresh_pct", "REAL"))
 
     def add_candidate(self, row: dict[str, Any]) -> int:
         cols = [c for c in row if c in self.CANDIDATE_COLUMNS]
