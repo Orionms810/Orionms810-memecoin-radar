@@ -120,6 +120,20 @@ creator_linked_critical = 3 # acheteurs financés par le créateur : à partir d
 rugger_critical = 2         # anciens tokens où le créateur a vidé ses parts : à partir de 2, refus direct
 dead_tokens_warn = 3        # anciens tokens du créateur morts sans décoller
 
+[trending]
+# Stratégie « tendance » : tokens qui décollent tout seuls, sans news (alertes 🔥).
+# On/off à chaud depuis Telegram : /tendance on · /tendance off
+enabled = true
+window_seconds = 180        # observe chaque nouveau token pendant ses 3 premières minutes
+min_age_seconds = 30        # jamais avant 30 s (les faux acheteurs achètent dès la 1re seconde)
+min_buyers = 20             # acheteurs différents (hors créateur)
+min_buy_sol = 4.0           # SOL achetés au total
+min_progress_pct = 10       # avancement de la bonding curve
+min_buy_sell_ratio = 2.0    # au moins 2 fois plus d'achats que de ventes (en SOL)
+max_checks_per_hour = 10    # analyses complètes max par heure (économise ta clé Helius)
+max_probes = 150            # tokens observés en même temps
+trade = true                # le trader (papier) peut acheter ces tokens
+
 [trading]
 # "off"   = pas de trading automatique
 # "paper" = argent VIRTUEL (par défaut) : teste au moins 2 semaines avant de passer en réel

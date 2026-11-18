@@ -43,6 +43,7 @@ from .risk import assess_risk, momentum_score
 from .storage import Storage
 from .telegram import Notifier
 from .text import extract_keywords, manual_keywords
+from .trending import TREND_ID, Probe, trend_trigger
 
 if TYPE_CHECKING:  # l'IA est optionnelle (module anthropic)
     from .ai import AIAnalyst
@@ -54,6 +55,7 @@ HELP = """🤖 <b>Memecoin Radar</b> — commandes
 /check &lt;adresse&gt; — analyse anti-rug d'un token
 /narratif &lt;mots&gt; — surveiller un narratif à la main (ex : /narratif covfefe, $COVF)
 /narratifs — narratifs actifs
+/tendance — tokens qui décollent sans news : /tendance on · /tendance off
 /supprimer &lt;id&gt; — arrêter un narratif (ex : /supprimer N3)
 /bilan — bilan « paper trading » des alertes
 /analyse — ce que sont devenus les tokens alertés ET refusés
@@ -137,6 +139,16 @@ class Engine:
         self.tg_channels: Any = None  # sources.telegram_channels si configuré
         self.journal = CandidateJournal(storage)
         self.journal.release = self.release_mint
+        # Stratégie « tendance » : un pseudo-narratif qui ne matche aucun mot-clé
+        self.trend_narrative = Narrative(
+            id=TREND_ID, keywords={}, created_at=time.time(), expires_at=float("inf"),
+            event=NewsEvent(source="trend", source_name="🔥 Tendance pump.fun", event_id="trend",
+                            text="Token qui décolle tout seul, sans news", weight=0.5,
+                            announce=False))
+        saved = storage.kv_get("trend_enabled", None)
+        self.trend_enabled = settings.trend.enabled if saved is None else bool(saved)
+        self.probation: dict[str, Probe] = {}
+        self._trend_checks: deque[float] = deque()
 
     # ------------------------------------------------------------- utilitaires
     def spawn(self, coro: Awaitable[Any]) -> asyncio.Task:
@@ -208,6 +220,8 @@ class Engine:
         self.baseline.add(token.name, token.symbol)
         self.recent.append(token)
         self._try_match(token, self.book.live())
+        if self.trend_enabled and token.mint not in self.candidates:
+            self._start_probe(token)
 
     def _retro_match(self, narr: Narrative) -> None:
         """Un narratif arrive : des tokens ont peut-être été créés juste avant."""
@@ -229,18 +243,75 @@ class Engine:
         if len(self.candidates) >= self.s.max_watched_tokens:
             log.info("Trop de tokens surveillés, %s ignoré", token.symbol)
             return
-        cand = Candidate(token=token, match=m, stats=TradeStats.for_token(token))
-        self.candidates[token.mint] = cand
         log.info("Candidat %s ($%s) ← %s (score %.2f, mots : %s)", token.name, token.symbol,
                  narr.id, m.score, ", ".join(m.keywords))
+        self._add_candidate(token, m, self.s.observe_seconds)
+
+    def _add_candidate(self, token: NewToken, m: MatchResult, delay: float) -> None:
+        probe = self.probation.pop(token.mint, None)  # garde ce qu'on a déjà observé
+        stats = probe.stats if probe else TradeStats.for_token(token)
+        cand = Candidate(token=token, match=m, stats=stats)
+        self.candidates[token.mint] = cand
         if self.feed:
             self.spawn(self.feed.subscribe_trades([token.mint]))
-        self.spawn(self._evaluate_later(cand, self.s.observe_seconds))
+        self.spawn(self._evaluate_later(cand, delay))
+
+    # -------------------------------------------------------- stratégie tendance
+    def _start_probe(self, token: NewToken) -> None:
+        if token.mint in self.probation or len(self.probation) >= self.s.trend.max_probes:
+            return
+        self.probation[token.mint] = Probe(token=token, stats=TradeStats.for_token(token),
+                                           until=token.created_at + self.s.trend.window_seconds)
+        if self.feed:
+            self.spawn(self.feed.subscribe_trades([token.mint]))
+
+    def _check_trend(self, probe: Probe, now: float | None = None) -> None:
+        now = now or time.time()
+        mint = probe.token.mint
+        if probe.stats.creator_sold:  # le dev vend pendant l'observation : on oublie
+            self.probation.pop(mint, None)
+            self.spawn(self.release_mint(mint))
+            return
+        reason = trend_trigger(probe.stats, now, self.s.trend)
+        if not reason:
+            return
+        while self._trend_checks and now - self._trend_checks[0] > 3600:
+            self._trend_checks.popleft()
+        if (len(self._trend_checks) >= self.s.trend.max_checks_per_hour
+                or len(self.candidates) >= self.s.max_watched_tokens):
+            return  # quota atteint : on réessaiera au prochain trade si le token décolle encore
+        self._trend_checks.append(now)
+        log.info("Tendance : %s ($%s) — %s", probe.token.name, probe.token.symbol, reason)
+        self._add_candidate(probe.token, MatchResult(self.trend_narrative, 1.0, [reason]), 3.0)
+
+    async def run_trending(self, every: float = 5.0) -> None:
+        """Arrête d'observer les tokens dont la période d'essai est finie."""
+        while True:
+            now = time.time()
+            for mint, probe in list(self.probation.items()):
+                if now > probe.until:
+                    del self.probation[mint]
+                    await self.release_mint(mint)
+            await asyncio.sleep(every)
+
+    def set_trend(self, enabled: bool) -> None:
+        self.trend_enabled = enabled
+        self.storage.kv_set("trend_enabled", enabled)
+        if not enabled:
+            mints = list(self.probation)
+            self.probation.clear()
+            for mint in mints:
+                self.spawn(self.release_mint(mint))
 
     def on_trade(self, trade: Trade) -> None:
         if self.trader:
             self.trader.on_trade(trade)
         self.journal.on_trade(trade)
+        probe = self.probation.get(trade.mint)
+        if probe:
+            probe.stats.apply(trade)
+            self._check_trend(probe)
+            return  # s'il devient candidat, il garde ces stats : ne pas compter le trade deux fois
         cand = self.candidates.get(trade.mint)
         if not cand:
             return
@@ -336,7 +407,7 @@ class Engine:
                 t for lvl, t in risk.flags if lvl in ("danger", "critical"))
         elif report.momentum < self.s.min_momentum:
             decision, detail = REJECT_MOMENTUM, f"momentum {report.momentum}/100 (personne n'achète)"
-        elif narr.alerts_sent >= self.s.max_alerts_per_narrative:
+        elif narr is not self.trend_narrative and narr.alerts_sent >= self.s.max_alerts_per_narrative:
             decision, detail = REJECT_LIMIT, f"déjà {narr.alerts_sent} alertes sur {narr.id}"
         row_id = self.journal.record(
             token=token, report=report, stats=cand.stats, decision=decision, detail=detail,
@@ -347,7 +418,8 @@ class Engine:
             return
         narr.alerts_sent += 1
         self.alerts_sent += 1
-        report.copies, report.rank = self._copies_rank(cand)
+        if narr is not self.trend_narrative:
+            report.copies, report.rank = self._copies_rank(cand)
         observed = time.time() - cand.started_at
         msg_id = await self.notifier.send(format_alert(report, observe_seconds=observed))
         cand.stage = "watching"
@@ -358,7 +430,7 @@ class Engine:
             mint=token.mint, name=token.name, symbol=token.symbol, narrative=narr.id,
             match_score=cand.match.score, safety=risk.safety, momentum=report.momentum,
             verdict=risk.verdict[1], entry_mcap_sol=cand.alert_mcap)
-        if self.trader:
+        if self.trader and (narr is not self.trend_narrative or self.s.trend.trade):
             self.spawn(self._trade_and_log(token, report, cand.stats, msg_id, row_id))
         if self.ai and self.s.ai_review_alerts:
             self.spawn(self._ai_review(report, msg_id))
@@ -391,7 +463,7 @@ class Engine:
 
     async def release_mint(self, mint: str) -> None:
         """Se désabonne des trades d'un token si plus personne ne le suit."""
-        if (mint in self.candidates or self.journal.holds(mint)
+        if (mint in self.candidates or mint in self.probation or self.journal.holds(mint)
                 or (self.trader and self.trader.holds(mint))):
             return
         if self.feed:
@@ -475,6 +547,19 @@ class Engine:
         if cmd == "/reprendre":
             self.notifier.muted = False
             return "🔔 Alertes réactivées."
+        if cmd == "/tendance":
+            if arg.lower() in ("on", "off"):
+                self.set_trend(arg.lower() == "on")
+            t = self.s.trend
+            state = "✅ activée" if self.trend_enabled else "⏹ désactivée"
+            return (f"🔥 <b>Stratégie tendance</b> : {state}\n"
+                    f"Tokens en observation : {len(self.probation)} · analyses cette heure : "
+                    f"{len(self._trend_checks)}/{t.max_checks_per_hour}\n"
+                    f"Déclenchement : ≥ {t.min_buyers} acheteurs, ≥ {t.min_buy_sol:g} SOL, courbe "
+                    f"≥ {t.min_progress_pct:g}%, entre {t.min_age_seconds:g} et "
+                    f"{t.window_seconds:g} s après le lancement\n"
+                    f"Trading papier sur ces tokens : {'oui' if t.trade else 'non'}\n"
+                    "/tendance on · /tendance off")
         if cmd == "/analyse":
             return format_analysis(self.storage.candidate_rows())
         if cmd == "/export":
@@ -503,6 +588,8 @@ class Engine:
                     f"Flux pump.fun : {ws} · {self.tokens_seen} tokens vus\n"
                     f"Narratifs actifs : {len(self.book.live())} · tokens surveillés : "
                     f"{len(self.candidates)} · alertes : {self.alerts_sent}\n"
+                    f"Tendance : {'on' if self.trend_enabled else 'off'} "
+                    f"({len(self.probation)} en observation)\n"
                     f"IA : {'oui' if self.ai else 'non'} · SOL : {sol} · "
                     f"alertes {'en pause' if self.notifier.muted else 'actives'}")
         return "Commande inconnue. Tape /aide."

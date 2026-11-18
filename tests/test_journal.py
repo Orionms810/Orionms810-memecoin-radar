@@ -91,7 +91,7 @@ async def test_analysis_and_csv(tmp_path):
     assert "Pas encore assez" in format_analysis(storage.candidate_rows())
     await j.tick(t0 + 1801)
     text = format_analysis(storage.candidate_rows())
-    assert "Alertés</b> (2) : x1.25" in text  # médiane de x2.0 et x0.5
+    assert "Alertés 🎯 narratif</b> (2) : x1.25" in text  # médiane de x2.0 et x0.5
     assert "Refusés (sécurité)</b> (2)" in text and "Refusés (momentum)</b> (1)" in text
     assert "sécurité 80-100 : x2.00" in text
     assert "Meilleur au plus haut : $T0" in text

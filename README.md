@@ -95,6 +95,20 @@ compte Telegram. C'est gratuit.
 
 ---
 
+## 🔥 Stratégie « tendance » (sans news)
+
+En plus des narratifs, le bot observe **chaque nouveau token** pendant ses 3
+premières minutes. S'il attire vite beaucoup d'acheteurs différents (20+), de
+vrais montants (4+ SOL), plus d'achats que de ventes et une bonding curve qui
+avance (10 %+), il devient candidat et passe par **les mêmes contrôles anti-rug**.
+Les alertes portent un 🔥 et `/analyse` sépare les résultats 🎯 narratif / 🔥 tendance.
+
+- `/tendance` : état · `/tendance off` : coupée immédiatement · `/tendance on` : relancée
+- Plus risqué que les narratifs (sans news, c'est plus souvent une manipulation) :
+  à juger avec `/analyse` après quelques jours en papier.
+
+---
+
 ## 🤖 Trading automatique
 
 Quand une alerte passe des filtres **plus stricts** (sécurité ≥ 60, momentum ≥ 30,
@@ -260,6 +274,7 @@ avec `tmux`, `screen` ou un service `systemd`.
 | `/check <adresse>` | Rapport anti-rug d'un token |
 | `/narratif covfefe, $COVF` | Surveille un narratif à la main (une news vue à la télé...) |
 | `/narratifs` | Liste les narratifs actifs |
+| `/tendance` · `/tendance on` · `/tendance off` | Stratégie tendance (tokens qui décollent sans news) |
 | `/supprimer N3` | Arrête un narratif |
 | `/bilan` | Bilan paper trading des alertes |
 | `/analyse` | Ce que sont devenus **tous** les tokens repérés (alertés et refusés) 30 min après |

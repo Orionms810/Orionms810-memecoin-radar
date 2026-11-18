@@ -133,12 +133,15 @@ def _risk_lines(risk: RiskReport) -> list[str]:
 def format_alert(r: TokenReport, *, observe_seconds: float) -> str:
     t, s = r.token, r.stats
     emoji, verdict = r.risk.verdict
-    lines = [f"🎯 <b>TOKEN LIÉ À UN NARRATIF</b> — {emoji} <b>{verdict}</b> "
-             f"(sécurité {r.risk.safety}/100)", ""]
+    trend = bool(r.match and r.match.narrative.id == "TENDANCE")
+    title = "🔥 <b>TOKEN TENDANCE</b> (sans news)" if trend else "🎯 <b>TOKEN LIÉ À UN NARRATIF</b>"
+    lines = [f"{title} — {emoji} <b>{verdict}</b> (sécurité {r.risk.safety}/100)", ""]
     lines.append(f"<b>{escape(t.name)}</b> (${escape(t.symbol)})")
     lines.append(f"<code>{t.mint}</code>")
     lines.append("")
-    if r.match:
+    if trend and r.match:
+        lines.append(f"📈 Décolle tout seul : {escape(', '.join(r.match.keywords))}")
+    elif r.match:
         n = r.match.narrative
         lines.append(f"📰 Narratif {n.id} : {escape(n.event.source_name)} — "
                      f"« {escape(short(n.event.text, 160))} »")
@@ -150,8 +153,12 @@ def format_alert(r: TokenReport, *, observe_seconds: float) -> str:
     mcap = s.last_mcap if s else t.market_cap_sol
     curve = f" · courbe {s.curve_progress:.0f}%" if s and s.curve_progress is not None else ""
     lines.append(f"💰 Market cap : {fmt_mcap(mcap, r.sol_usd)}{curve}")
-    copies = (f" · {r.copies} autre(s) token(s) sur ce narratif, celui-ci #{r.rank} en volume"
-              if r.copies else " · seul token détecté sur ce narratif")
+    if trend:
+        copies = ""
+    elif r.copies:
+        copies = f" · {r.copies} autre(s) token(s) sur ce narratif, celui-ci #{r.rank} en volume"
+    else:
+        copies = " · seul token détecté sur ce narratif"
     lines.append(f"⏱ Âge : {fmt_age(time.time() - t.created_at)}{copies}")
     if s:
         lines.append(f"📈 Flux ({observe_seconds:.0f} s observées) : {s.buys} achats / {s.sells} ventes · "

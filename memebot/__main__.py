@@ -142,7 +142,7 @@ async def run_live(settings: Settings) -> None:
         engine, notifier = build_live(settings, http)
         feed = PumpPortalClient(engine.on_new_token, engine.on_trade)
         engine.feed = feed
-        coros = [feed.run(), engine.housekeeping(), engine.journal.run()]
+        coros = [feed.run(), engine.housekeeping(), engine.journal.run(), engine.run_trending()]
         trader = await build_trader(settings, engine, http, feed)
         if trader:
             coros.append(trader.run())

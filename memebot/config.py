@@ -12,6 +12,7 @@ from dotenv import load_dotenv
 
 from .risk import RiskThresholds
 from .trading.settings import TradingSettings
+from .trending import TrendSettings
 
 DEFAULT_GENERIC = [
     "trump", "donald", "elon", "musk", "elonmusk", "donaldtrump", "realdonaldtrump", "tweet", "coin", "token", "sol", "solana", "pump", "moon",
@@ -75,6 +76,7 @@ class Settings:
 
     risk: RiskThresholds = field(default_factory=RiskThresholds)
     trading: TradingSettings = field(default_factory=TradingSettings)
+    trend: TrendSettings = field(default_factory=TrendSettings)
     wallet_secret: str | None = None  # clé privée du wallet dédié (mode réel uniquement)
 
     # chaînes Telegram (compte utilisateur via Telethon)
@@ -145,6 +147,9 @@ def load_settings(config_path: str | Path = "config.toml", env_path: str | Path 
         for key, value in (raw.get("risk") or {}).items():
             if hasattr(s.risk, key) and value is not None:
                 setattr(s.risk, key, value)
+        for key, value in (raw.get("trending") or {}).items():
+            if hasattr(s.trend, key) and value is not None:
+                setattr(s.trend, key, value)
         for key, value in (raw.get("trading") or {}).items():
             if hasattr(s.trading, key) and value is not None:
                 setattr(s.trading, key, value)
