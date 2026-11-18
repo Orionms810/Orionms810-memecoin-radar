@@ -10,9 +10,23 @@ REPO="https://github.com/Orionms810/Orionms810-memecoin-radar.git"
 DIR="$HOME/memecoin-radar"
 RUN_USER="$(id -un)"
 
-echo "==> Paquets système (Python, git)"
-sudo apt-get update -y
-sudo apt-get install -y git python3 python3-venv python3-pip
+# Un serveur tout neuf fait souvent ses mises à jour automatiques au démarrage :
+# apt est alors verrouillé. On attend et on réessaie au lieu d'échouer.
+apt_retry() {
+  for _ in $(seq 1 20); do
+    if sudo apt-get -o DPkg::Lock::Timeout=60 "$@"; then
+      return 0
+    fi
+    echo "   (Debian fait encore ses mises à jour automatiques, nouvel essai dans 30 s...)"
+    sleep ${APT_RETRY_SLEEP:-30}
+  done
+  echo "❌ apt est resté bloqué trop longtemps. Relance la commande d'installation dans 5 min."
+  return 1
+}
+
+echo "==> Paquets système (Python, git) — peut prendre quelques minutes"
+apt_retry update -y
+apt_retry install -y git python3 python3-venv python3-pip
 
 echo "==> Code du bot dans $DIR"
 if [ -d "$DIR/.git" ]; then
