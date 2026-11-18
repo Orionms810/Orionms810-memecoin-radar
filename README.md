@@ -173,9 +173,19 @@ copy .env.example .env
 python -m memebot --demo
 ```
 
-Les fois suivantes : **double-clique sur `lancer-bot.bat`** dans le dossier du bot. Il active l'environnement et lance le bot (il fait aussi l'installation la première fois).
+Ensuite, tout se fait en double-clic dans le dossier du bot :
 
-Pour qu'il démarre tout seul avec Windows : `Win + R`, tape `shell:startup`, Entrée, puis fais clic droit → Nouveau → Raccourci vers `lancer-bot.bat`.
+| Fichier | Effet |
+|---|---|
+| `lancer-bot.bat` | Lance le bot (installe ou répare tout seul ce qui manque) |
+| `mettre-a-jour.bat` | Installe la dernière version depuis GitHub, **sans toucher** à `.env`, `config.toml`, la base `memebot.db` ni la session Telegram (ferme le bot avant) |
+| `connexion-telegram.bat` | Connexion unique à ton compte Telegram pour lire des chaînes |
+
+Pour qu'il démarre tout seul avec Windows : `Win + R`, tape `shell:startup`, Entrée,
+puis fais clic droit → Nouveau → Raccourci vers `lancer-bot.bat`.
+
+Évite de mettre le dossier dans **OneDrive** (Bureau ou Documents synchronisés) :
+la synchronisation peut gêner la base de données. `C:\memecoin-radar` est un bon endroit.
 
 ### Mac / Linux
 
