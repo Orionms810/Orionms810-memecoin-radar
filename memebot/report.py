@@ -69,6 +69,11 @@ class TokenReport:
                             "market_cap_sol_max": round(s.max_mcap, 1),
                             "creator_sold": s.creator_sold,
                             "bonding_curve_progress_pct": s.curve_progress}
+        if self.creator and self.creator.known_previous:
+            d["creator_history"] = {
+                "previous_tokens": self.creator.known_previous,
+                "dev_exited_without_success": self.creator.dev_exited,
+                "dead": self.creator.dead, "graduated": self.creator.graduated}
         if self.funding:
             d["first_buyers_funding"] = {
                 "checked": self.funding.analyzed, "fresh_wallets": self.funding.fresh,

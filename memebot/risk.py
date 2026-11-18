@@ -35,6 +35,8 @@ class RiskThresholds:
     shared_funder_danger: int = 3
     fresh_ratio_warn: float = 0.7  # part des premiers acheteurs qui sont des wallets neufs
     creator_linked_critical: int = 3  # acheteurs liés au créateur : au-delà, refus direct
+    rugger_critical: int = 2  # anciens tokens où le créateur a vidé ses parts : refus direct
+    dead_tokens_warn: int = 3  # anciens tokens morts sans décoller
 
 
 def assess_risk(
@@ -92,6 +94,21 @@ def assess_risk(
             flag("warn", f"Le créateur a déjà lancé d'autres tokens ({detail})", 10)
         else:
             flag("ok", "Pas d'historique de lancements en série détecté")
+
+    # 3 bis. Comment ont fini ses anciens tokens ?
+    if creator and creator.known_previous:
+        ex, dead, grad = creator.dev_exited, creator.dead, creator.graduated
+        if ex >= th.rugger_critical:
+            critical = True
+            flag("critical", f"Rugger récidiviste : le créateur a vidé ses parts sur {ex} de ses "
+                             "anciens tokens", 40)
+        elif ex == 1:
+            flag("danger", "Le créateur a déjà vidé ses parts sur un de ses anciens tokens", 20)
+        if dead >= th.dead_tokens_warn and grad == 0:
+            flag("warn", f"{dead} anciens tokens du créateur sont morts sans décoller", 10)
+        if grad:
+            best = f" (meilleur : {creator.best_mcap_usd / 1000:.0f}k$)" if creator.best_mcap_usd else ""
+            flag("ok", f"Le créateur a déjà fait graduer {grad} token(s){best}")
 
     # 4. Concentration des holders
     if holders:

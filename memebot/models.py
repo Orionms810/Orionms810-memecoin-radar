@@ -257,6 +257,11 @@ class DexInfo:
 class CreatorInfo:
     launches_24h: int  # AUTRES tokens du même créateur vus par le bot sur 24 h
     launches_total_api: int | None = None  # via l'API pump.fun si dispo
+    known_previous: int = 0  # anciens tokens retrouvés
+    dev_exited: int = 0  # anciens tokens où il a vidé ses parts (sans succès)
+    dead: int = 0  # anciens tokens morts sans décoller
+    graduated: int = 0  # anciens tokens qui ont terminé leur bonding curve
+    best_mcap_usd: float | None = None
 
 
 @dataclass

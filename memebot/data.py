@@ -46,6 +46,7 @@ class LiveData:
         self.use_rugcheck = use_rugcheck
         self._sol_usd: tuple[float, float] | None = None  # (prix, timestamp)
         self._rpc_id = 0
+        self._exited: set[tuple[str, str]] = set()  # (créateur, token) : sortie définitive
         self.funding_tracer = FundingTracer(self._rpc, exchange_balance_sol=funding_exchange_sol,
                                             ignore=tuple(ignore_funders))
 
@@ -172,21 +173,40 @@ class LiveData:
         return info
 
     # ------------------------------------------------------------ pump.fun API
-    async def creator_launch_count(self, creator: str) -> int | None:
-        """Nb de tokens créés par ce wallet selon l'API (non officielle) de pump.fun."""
+    async def creator_coins(self, creator: str) -> list[dict[str, Any]] | None:
+        """Tokens créés par ce wallet selon l'API (non officielle) de pump.fun."""
         if not self.use_pumpfun_api:
             return None
         data = await self._get_json(
             f"https://frontend-api-v3.pump.fun/coins/user-created-coins/{creator}"
             "?offset=0&limit=50&includeNsfw=true", timeout=5.0)
-        if isinstance(data, list):
-            return len(data)
-        if isinstance(data, dict):
-            if isinstance(data.get("count"), int):
-                return data["count"]
-            if isinstance(data.get("coins"), list):
-                return len(data["coins"])
-        return None
+        coins = data.get("coins") if isinstance(data, dict) else data
+        if not isinstance(coins, list):
+            return None
+        return [c for c in coins if isinstance(c, dict)]
+
+    async def creator_exits(self, creator: str, mints: list[str]) -> dict[str, bool] | None:
+        """Pour chaque ancien token : le créateur a-t-il vidé ses parts ? (RPC)"""
+        out: dict[str, bool] = {}
+        for mint in mints[:5]:
+            if (creator, mint) in self._exited:
+                out[mint] = True
+                continue
+            res = await self._rpc("getTokenAccountsByOwner", [
+                creator, {"mint": mint}, {"encoding": "jsonParsed", "commitment": "confirmed"}])
+            if not isinstance(res, dict):
+                continue  # erreur RPC : on ne conclut rien
+            total = 0.0
+            for acc in res.get("value") or []:
+                try:
+                    amount = acc["account"]["data"]["parsed"]["info"]["tokenAmount"]
+                    total += float(amount.get("uiAmountString") or amount.get("uiAmount") or 0)
+                except (KeyError, TypeError, ValueError):
+                    continue
+            out[mint] = total <= 0
+            if total <= 0:
+                self._exited.add((creator, mint))
+        return out
 
     async def pump_coin(self, mint: str) -> dict[str, Any] | None:
         if not self.use_pumpfun_api:

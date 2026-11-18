@@ -88,7 +88,20 @@ class Storage:
         return int(self.db.execute(
             "SELECT COUNT(*) FROM tokens WHERE created_at>=?", (since,)).fetchone()[0])
 
-    def prune(self, older_than_days: float = 3) -> None:
+    def creator_tokens(self, creator: str, exclude_mint: str, limit: int = 10) -> list[sqlite3.Row]:
+        return self.db.execute(
+            "SELECT * FROM tokens WHERE creator=? AND mint<>? ORDER BY created_at DESC LIMIT ?",
+            (creator, exclude_mint, limit)).fetchall()
+
+    def candidate_outcomes(self, mints: list[str]) -> list[sqlite3.Row]:
+        if not mints:
+            return []
+        marks = ",".join("?" * len(mints))
+        return self.db.execute(
+            f"SELECT mint, creator_sold_30, mcap_eval, mcap_30, max_mcap_30 FROM candidates "
+            f"WHERE mint IN ({marks})", mints).fetchall()
+
+    def prune(self, older_than_days: float = 14) -> None:
         now = time.time()
         self.db.execute("DELETE FROM tokens WHERE created_at<?",
                         (now - older_than_days * 86400,))
@@ -191,9 +204,13 @@ class Storage:
         "momentum", "dev_buy_pct", "top10_pct", "early_buyers", "buyers", "buy_sol", "sell_sol",
         "age_s", "decision", "detail", "mcap_eval", "mcap_5", "mcap_15", "mcap_30", "max_mcap_30",
         "creator_sold_30", "traded", "trade_detail",
-        "funding_checked", "funding_shared", "funding_creator", "funding_fresh_pct")
+        "funding_checked", "funding_shared", "funding_creator", "funding_fresh_pct",
+        "creator", "creator_prev", "creator_exited_prev", "creator_dead_prev", "creator_graduated_prev")
     ADDED_CANDIDATE_COLUMNS = (("funding_checked", "INTEGER"), ("funding_shared", "INTEGER"),
-                               ("funding_creator", "INTEGER"), ("funding_fresh_pct", "REAL"))
+                               ("funding_creator", "INTEGER"), ("funding_fresh_pct", "REAL"),
+                               ("creator", "TEXT"), ("creator_prev", "INTEGER"),
+                               ("creator_exited_prev", "INTEGER"), ("creator_dead_prev", "INTEGER"),
+                               ("creator_graduated_prev", "INTEGER"))
 
     def add_candidate(self, row: dict[str, Any]) -> int:
         cols = [c for c in row if c in self.CANDIDATE_COLUMNS]

@@ -117,6 +117,8 @@ shared_funder_warn = 2      # premiers acheteurs financés par le même wallet
 shared_funder_danger = 3
 fresh_ratio_warn = 0.7      # part des premiers acheteurs qui sont des wallets tout neufs
 creator_linked_critical = 3 # acheteurs financés par le créateur : à partir de 3, refus direct
+rugger_critical = 2         # anciens tokens où le créateur a vidé ses parts : à partir de 2, refus direct
+dead_tokens_warn = 3        # anciens tokens du créateur morts sans décoller
 
 [trading]
 # "off"   = pas de trading automatique

@@ -25,6 +25,7 @@ from .models import (
     Trade,
     TradeStats,
 )
+from .creator import build_history, summarize as summarize_history
 from .journal import ALERT, REJECT_LIMIT, REJECT_MOMENTUM, REJECT_SAFETY, CandidateJournal
 from .journal import format_analysis, to_csv
 from .narratives import KeywordBaseline, MatchResult, NarrativeBook, match_token
@@ -75,7 +76,8 @@ class DataProvider(Protocol):
     async def holders(self, mint: str, *, exclude_owners: set[str],
                       creator: str | None = None) -> HolderInfo | None: ...
     async def rugcheck(self, mint: str) -> RugcheckInfo | None: ...
-    async def creator_launch_count(self, creator: str) -> int | None: ...
+    async def creator_coins(self, creator: str) -> list[dict[str, Any]] | None: ...
+    async def creator_exits(self, creator: str, mints: list[str]) -> dict[str, bool] | None: ...
     async def pump_coin(self, mint: str) -> dict[str, Any] | None: ...
     async def dexscreener(self, mint: str) -> DexInfo | None: ...
     async def funding(self, buyers: list[str], *, creator: str | None = None) -> Any: ...
@@ -280,20 +282,33 @@ class Engine:
             exclude.add(dex.pair_address)
         buyers = (stats.first_buyers[: self.s.funding_wallets]
                   if stats and self.s.funding_check else [])
-        meta, holders, rug, api_count, funding = await asyncio.gather(
+        now = time.time()
+        local_prev = self.storage.creator_tokens(token.creator, token.mint) if token.creator else []
+        # sorties vérifiables : anciens tokens où le dev avait acheté, lancés il y a > 10 min
+        exit_mints = [r["mint"] for r in local_prev
+                      if (r["initial_buy"] or 0) > 0 and now - (r["created_at"] or now) > 600]
+        meta, holders, rug, coins, funding, exits = await asyncio.gather(
             _safe(self.data.metadata(token.uri), 6) if token.uri else _none(),
             _safe(self.data.holders(token.mint, exclude_owners=exclude,
                                     creator=token.creator or None), 12),
             _safe(self.data.rugcheck(token.mint), 8),
-            _safe(self.data.creator_launch_count(token.creator), 6) if token.creator else _none(),
+            _safe(self.data.creator_coins(token.creator), 6) if token.creator else _none(),
             _safe(self.data.funding(buyers, creator=token.creator or None), 15) if buyers else _none(),
+            _safe(self.data.creator_exits(token.creator, exit_mints), 10) if exit_mints else _none(),
         )
         creator = None
         if token.creator:
             n = self.storage.creator_launches(token.creator, time.time() - 86400)
             if self.storage.get_token(token.mint) and token.created_at >= time.time() - 86400:
                 n -= 1  # ne pas compter le token analysé lui-même
-            creator = CreatorInfo(launches_24h=max(0, n), launches_total_api=api_count)
+            local_mints = [r["mint"] for r in local_prev]
+            past = build_history(
+                current_mint=token.mint, local_mints=local_mints,
+                outcomes=self.storage.candidate_outcomes(local_mints), api_coins=coins,
+                exits=exits, sol_usd=self.sol_usd, now=now)
+            creator = CreatorInfo(launches_24h=max(0, n),
+                                  launches_total_api=len(coins) if coins is not None else None,
+                                  **summarize_history(past))
         risk = assess_risk(
             dev_buy_pct=token.dev_buy_pct if dev_buy_known else None,
             stats=stats, holders=holders, rugcheck=rug, creator=creator,

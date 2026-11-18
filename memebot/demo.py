@@ -46,6 +46,8 @@ class FakeData:
         self.meta_by_uri: dict[str, TokenMetadata] = {}
         self.rug_by_mint: dict[str, RugcheckInfo] = {}
         self.funding_by_creator: dict[str, FundingInfo] = {}
+        self.coins_by_creator: dict[str, list[dict[str, Any]]] = {}
+        self.exited: set[tuple[str, str]] = set()
 
     async def metadata(self, uri: str) -> TokenMetadata | None:
         return self.meta_by_uri.get(uri)
@@ -57,8 +59,11 @@ class FakeData:
     async def rugcheck(self, mint: str) -> RugcheckInfo | None:
         return self.rug_by_mint.get(mint)
 
-    async def creator_launch_count(self, creator: str) -> int | None:
-        return None
+    async def creator_coins(self, creator: str) -> list[dict[str, Any]] | None:
+        return self.coins_by_creator.get(creator)
+
+    async def creator_exits(self, creator: str, mints: list[str]) -> dict[str, bool] | None:
+        return {m: True for m in mints if (creator, m) in self.exited}
 
     async def pump_coin(self, mint: str) -> dict[str, Any] | None:
         return None
@@ -127,8 +132,11 @@ async def run_demo() -> None:
         url="https://x.com/realDonaldTrump/status/0", weight=1.0, aliases=("trump", "donald")))
 
     serial = fake_address("serial-dev")
-    for i in range(4):  # un créateur en série a déjà lancé 4 tokens aujourd'hui
-        engine.on_new_token(make_token(f"Old scam {i}", "SCAM" + string.ascii_uppercase[i], serial, 20))
+    for i in range(4):  # un créateur en série a déjà lancé 4 tokens, et les a tous vidés
+        old = make_token(f"Old scam {i}", "SCAM" + string.ascii_uppercase[i], serial, 20)
+        old.created_at = time.time() - 3600 * (i + 1)
+        engine.on_new_token(old)
+        data.exited.add((serial, old.mint))
 
     good = make_token("Nugget the Hamster", "NUGGET", fake_address("dev-good"), 2.0)
     data.meta_by_uri[good.uri] = TokenMetadata(
