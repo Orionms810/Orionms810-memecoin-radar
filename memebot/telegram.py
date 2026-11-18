@@ -71,6 +71,22 @@ class Notifier:
             log.warning("Telegram : envoi impossible (%s)", e)
             return None
 
+    async def send_document(self, filename: str, content: bytes, caption: str = "") -> bool:
+        if not self.telegram_enabled:
+            return False
+        try:
+            assert self.http is not None
+            r = await self.http.post(self._url("sendDocument"), timeout=30,
+                                     data={"chat_id": self.chat_id, "caption": caption[:1000]},
+                                     files={"document": (filename, content, "text/csv")})
+            data = r.json()
+            if not data.get("ok"):
+                log.warning("Telegram (fichier) : %s", data.get("description"))
+            return bool(data.get("ok"))
+        except (httpx.HTTPError, ValueError) as e:
+            log.warning("Telegram : envoi du fichier impossible (%s)", e)
+            return False
+
     async def poll_commands(self, handler: CommandHandler) -> None:
         """Long polling des messages reçus par le bot Telegram."""
         if not (self.http and self.token):

@@ -25,6 +25,8 @@ from .models import (
     Trade,
     TradeStats,
 )
+from .journal import ALERT, REJECT_LIMIT, REJECT_MOMENTUM, REJECT_SAFETY, CandidateJournal
+from .journal import format_analysis, to_csv
 from .narratives import KeywordBaseline, MatchResult, NarrativeBook, match_token
 from .report import (
     TokenReport,
@@ -53,6 +55,8 @@ HELP = """🤖 <b>Memecoin Radar</b> — commandes
 /narratifs — narratifs actifs
 /supprimer &lt;id&gt; — arrêter un narratif (ex : /supprimer N3)
 /bilan — bilan « paper trading » des alertes
+/analyse — ce que sont devenus les tokens alertés ET refusés
+/export — fichier Excel (CSV) de tous les candidats
 /status — état du bot
 /pause · /reprendre — couper / remettre les alertes
 <b>Chaînes Telegram</b> (tweets d'Elon, Trump... republiés)
@@ -128,6 +132,8 @@ class Engine:
         self.sol_usd: float | None = None
         self.trader: Any = None  # trading.trader.Trader si le trading est activé
         self.tg_channels: Any = None  # sources.telegram_channels si configuré
+        self.journal = CandidateJournal(storage)
+        self.journal.release = self.release_mint
 
     # ------------------------------------------------------------- utilitaires
     def spawn(self, coro: Awaitable[Any]) -> asyncio.Task:
@@ -231,6 +237,7 @@ class Engine:
     def on_trade(self, trade: Trade) -> None:
         if self.trader:
             self.trader.on_trade(trade)
+        self.journal.on_trade(trade)
         cand = self.candidates.get(trade.mint)
         if not cand:
             return
@@ -303,17 +310,20 @@ class Engine:
         token, narr = cand.token, cand.match.narrative
         report = await self.build_report(token, stats=cand.stats, match=cand.match)
         risk = report.risk
+        decision, detail = ALERT, "alerte envoyée"
         if (risk.critical or risk.safety < self.s.min_safety_to_alert) and not self.s.show_dangerous:
-            log.info("%s ($%s) écarté : sécurité %s/100 (%s)", token.name, token.symbol,
-                     risk.safety, "; ".join(t for lvl, t in risk.flags if lvl in ("danger", "critical")))
-            await self._drop(cand)
-            return
-        if report.momentum < self.s.min_momentum:
-            log.info("%s ($%s) écarté : momentum %s/100 (personne n'achète)", token.name,
-                     token.symbol, report.momentum)
-            await self._drop(cand)
-            return
-        if narr.alerts_sent >= self.s.max_alerts_per_narrative:
+            decision = REJECT_SAFETY
+            detail = f"sécurité {risk.safety}/100 : " + "; ".join(
+                t for lvl, t in risk.flags if lvl in ("danger", "critical"))
+        elif report.momentum < self.s.min_momentum:
+            decision, detail = REJECT_MOMENTUM, f"momentum {report.momentum}/100 (personne n'achète)"
+        elif narr.alerts_sent >= self.s.max_alerts_per_narrative:
+            decision, detail = REJECT_LIMIT, f"déjà {narr.alerts_sent} alertes sur {narr.id}"
+        row_id = self.journal.record(
+            token=token, report=report, stats=cand.stats, decision=decision, detail=detail,
+            narrative_id=narr.id, source=narr.event.source_name, match_score=cand.match.score)
+        if decision != ALERT:
+            log.info("%s ($%s) écarté : %s", token.name, token.symbol, detail)
             await self._drop(cand)
             return
         narr.alerts_sent += 1
@@ -330,11 +340,16 @@ class Engine:
             match_score=cand.match.score, safety=risk.safety, momentum=report.momentum,
             verdict=risk.verdict[1], entry_mcap_sol=cand.alert_mcap)
         if self.trader:
-            self.spawn(self.trader.on_signal(token, report, cand.stats, msg_id))
+            self.spawn(self._trade_and_log(token, report, cand.stats, msg_id, row_id))
         if self.ai and self.s.ai_review_alerts:
             self.spawn(self._ai_review(report, msg_id))
         self._check_watch(cand)  # le dev a peut-être déjà vendu pendant l'envoi
         self.spawn(self._watch_then_close(cand))
+
+    async def _trade_and_log(self, token: NewToken, report: TokenReport, stats: TradeStats,
+                             msg_id: int | None, row_id: int) -> None:
+        reason = await self.trader.on_signal(token, report, stats, msg_id)
+        self.journal.set_trade(row_id, reason is None, reason or "acheté")
 
     async def _ai_review(self, report: TokenReport, msg_id: int | None) -> None:
         assert self.ai is not None
@@ -357,7 +372,8 @@ class Engine:
 
     async def release_mint(self, mint: str) -> None:
         """Se désabonne des trades d'un token si plus personne ne le suit."""
-        if mint in self.candidates or (self.trader and self.trader.holds(mint)):
+        if (mint in self.candidates or self.journal.holds(mint)
+                or (self.trader and self.trader.holds(mint))):
             return
         if self.feed:
             await self.feed.unsubscribe_trades([mint])
@@ -440,6 +456,16 @@ class Engine:
         if cmd == "/reprendre":
             self.notifier.muted = False
             return "🔔 Alertes réactivées."
+        if cmd == "/analyse":
+            return format_analysis(self.storage.candidate_rows())
+        if cmd == "/export":
+            rows = self.storage.candidate_rows()
+            if not rows:
+                return "Aucun candidat enregistré pour l'instant."
+            name = time.strftime("candidats-%Y%m%d-%H%M.csv")
+            ok = await self.notifier.send_document(name, to_csv(rows),
+                                                   f"{len(rows)} candidats (ouvre avec Excel)")
+            return None if ok else "Envoi du fichier impossible (Telegram non configuré ?)."
         if cmd == "/bilan":
             return format_paper_stats(self.storage.paper_stats())
         if cmd in CHANNEL_COMMANDS:

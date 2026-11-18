@@ -89,7 +89,13 @@ async def test_full_flow_alert_then_dev_sells(setup):
     assert all(reply == alert_msg_id for t, reply in notifier.sent if "ALERTE" in t)
 
     await asyncio.sleep(1.0)  # fin du suivi (0.6 s)
-    assert tok.mint not in engine.candidates and tok.mint not in feed.subs
+    assert tok.mint not in engine.candidates
+    assert tok.mint in feed.subs  # le journal suit encore le prix pendant 30 min
+    await engine.journal.tick(time.time() + 1801)
+    assert tok.mint not in feed.subs
+    row = engine.storage.candidate_rows()[0]
+    assert row["decision"] == "alerte" and row["creator_sold_30"] == 1
+    assert row["mcap_30"] == pytest.approx(mcap * 0.3)
     stats = engine.storage.paper_stats()
     assert stats["closed"] == 1 and stats["rugs"] == 1 and stats["median_end_x"] < 1
     check = await engine.handle_command(f"/check {tok.mint}")
@@ -109,7 +115,11 @@ async def test_dangerous_and_dead_tokens_are_not_alerted(setup):
     pump(engine, rug)
     await asyncio.sleep(0.4)
     assert len(notifier.sent) == n_before
-    assert not engine.candidates and not feed.subs
+    assert not engine.candidates
+    decisions = {r["symbol"]: r["decision"] for r in engine.storage.candidate_rows()}
+    assert decisions == {"NUGG": "refus_securite", "NUGD": "refus_momentum"}
+    await engine.journal.tick(time.time() + 1801)
+    assert not feed.subs  # suivi terminé : plus d'abonnement
 
 
 async def test_retro_match_tokens_created_before_the_post(setup):

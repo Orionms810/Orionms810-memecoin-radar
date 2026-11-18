@@ -320,7 +320,11 @@ async def test_engine_alert_triggers_paper_trade(tmp_path):
     engine.on_trade(Trade(mint=tok.mint, trader="DevN", is_buy=False, sol_amount=1,
                           token_amount=1, new_balance=0, market_cap_sol=mcap * 0.8))
     await asyncio.sleep(0.1)
-    assert tok.mint not in t.positions and tok.mint not in feed.subs
+    assert tok.mint not in t.positions
     assert "le dev vend" in notifier.sent[-1][0]
+    row = storage.candidate_rows()[0]
+    assert row["traded"] == 1 and row["trade_detail"] == "acheté"
+    await engine.journal.tick(time.time() + 1801)
+    assert tok.mint not in feed.subs
     for task in list(engine.tasks) + list(t.tasks):
         task.cancel()

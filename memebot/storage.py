@@ -29,6 +29,13 @@ CREATE TABLE IF NOT EXISTS trades(
     id INTEGER PRIMARY KEY AUTOINCREMENT, mode TEXT, mint TEXT, symbol TEXT, name TEXT,
     opened_at REAL, closed_at REAL, entry_sol REAL, exit_sol REAL, pnl_sol REAL, reason TEXT);
 CREATE TABLE IF NOT EXISTS kv(key TEXT PRIMARY KEY, value TEXT);
+CREATE TABLE IF NOT EXISTS candidates(
+    id INTEGER PRIMARY KEY AUTOINCREMENT, created_at REAL, mint TEXT, symbol TEXT, name TEXT,
+    narrative TEXT, source TEXT, match_score REAL, safety INTEGER, momentum INTEGER,
+    dev_buy_pct REAL, top10_pct REAL, early_buyers INTEGER, buyers INTEGER, buy_sol REAL,
+    sell_sol REAL, age_s REAL, decision TEXT, detail TEXT, mcap_eval REAL, mcap_5 REAL,
+    mcap_15 REAL, mcap_30 REAL, max_mcap_30 REAL, creator_sold_30 INTEGER DEFAULT 0,
+    traded INTEGER DEFAULT 0, trade_detail TEXT);
 """
 
 
@@ -169,3 +176,30 @@ class Storage:
             "SELECT COUNT(*), COALESCE(SUM(pnl_sol),0), COALESCE(SUM(pnl_sol>=0),0) "
             "FROM trades WHERE mode=?", (mode,)).fetchone()
         return {"count": int(row[0]), "pnl": float(row[1]), "wins": int(row[2])}
+
+    # ------------------------------------------------- journal des candidats
+    CANDIDATE_COLUMNS = (
+        "created_at", "mint", "symbol", "name", "narrative", "source", "match_score", "safety",
+        "momentum", "dev_buy_pct", "top10_pct", "early_buyers", "buyers", "buy_sol", "sell_sol",
+        "age_s", "decision", "detail", "mcap_eval", "mcap_5", "mcap_15", "mcap_30", "max_mcap_30",
+        "creator_sold_30", "traded", "trade_detail")
+
+    def add_candidate(self, row: dict[str, Any]) -> int:
+        cols = [c for c in row if c in self.CANDIDATE_COLUMNS]
+        cur = self.db.execute(
+            f"INSERT INTO candidates({','.join(cols)}) VALUES ({','.join('?' * len(cols))})",
+            [row[c] for c in cols])
+        self.db.commit()
+        return int(cur.lastrowid or 0)
+
+    def update_candidate(self, row_id: int, values: dict[str, Any]) -> None:
+        cols = [c for c in values if c in self.CANDIDATE_COLUMNS]
+        if not cols:
+            return
+        self.db.execute(f"UPDATE candidates SET {', '.join(c + '=?' for c in cols)} WHERE id=?",
+                        [values[c] for c in cols] + [row_id])
+        self.db.commit()
+
+    def candidate_rows(self, since: float = 0) -> list[sqlite3.Row]:
+        return self.db.execute("SELECT * FROM candidates WHERE created_at>=? ORDER BY id",
+                               (since,)).fetchall()

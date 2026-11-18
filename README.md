@@ -261,6 +261,8 @@ avec `tmux`, `screen` ou un service `systemd`.
 | `/narratifs` | Liste les narratifs actifs |
 | `/supprimer N3` | Arrête un narratif |
 | `/bilan` | Bilan paper trading des alertes |
+| `/analyse` | Ce que sont devenus **tous** les tokens repérés (alertés et refusés) 30 min après |
+| `/export` | Fichier CSV (Excel) de tous les candidats et de leurs mesures |
 | `/status` | État du bot |
 | `/pause` · `/reprendre` | Coupe / remet les alertes |
 | `/trading` · `/trading on` · `/trading off` | État du trading, l'activer, le couper |
