@@ -28,7 +28,7 @@ class TrendSettings:
     min_progress_pct: float = 10.0  # avancement de la bonding curve
     min_buy_sell_ratio: float = 2.0  # SOL achetés / SOL vendus
     max_checks_per_hour: int = 10  # analyses complètes max par heure (économise le RPC)
-    max_probes: int = 150  # tokens observés en même temps
+    max_probes: int = 60  # tokens observés en même temps (abonnements RPC)
     trade: bool = True  # le trader (papier) peut acheter ces tokens
 
 

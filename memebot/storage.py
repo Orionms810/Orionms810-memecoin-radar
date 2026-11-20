@@ -44,6 +44,9 @@ class Storage:
         self.db = sqlite3.connect(str(path))
         self.db.row_factory = sqlite3.Row
         self.db.execute("PRAGMA journal_mode=WAL")
+        # WAL + NORMAL : pas de synchronisation disque à chaque écriture (le disque du
+        # serveur gratuit est très lent) ; la base reste cohérente en cas de coupure.
+        self.db.execute("PRAGMA synchronous=NORMAL")
         self.db.executescript(SCHEMA)
         self._migrate()
         self.db.commit()

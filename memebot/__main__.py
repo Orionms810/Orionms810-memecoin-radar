@@ -18,6 +18,7 @@ import httpx
 from .config import Settings, load_settings
 from .data import LiveData
 from .engine import Engine
+from .chainfeed import SolanaTradeFeed, ws_url_from_rpc
 from .pumpportal import PumpPortalClient
 from .sources.rss import Feed, RSSSource
 from .sources.telegram_channels import ChannelCfg, TelegramChannelsSource, normalize_handle
@@ -140,9 +141,20 @@ async def build_trader(settings: Settings, engine: Engine, http: httpx.AsyncClie
 async def run_live(settings: Settings) -> None:
     async with httpx.AsyncClient(limits=httpx.Limits(max_connections=50)) as http:
         engine, notifier = build_live(settings, http)
-        feed = PumpPortalClient(engine.on_new_token, engine.on_trade)
+        tokens = PumpPortalClient(engine.on_new_token, engine.on_trade,
+                                  api_key=settings.pumpportal_api_key)
+        if settings.pumpportal_api_key:
+            feed = tokens  # trades via PumpPortal (clé payante)
+            coros = [tokens.run()]
+            log.info("Trades : PumpPortal (clé API)")
+        else:  # gratuit : trades lus sur la blockchain via le RPC (Helius)
+            feed = SolanaTradeFeed(settings.solana_ws_url or ws_url_from_rpc(settings.rpc_url),
+                                   engine.on_trade)
+            coros = [tokens.run(), feed.run()]
+            log.info("Trades : lus sur la blockchain Solana (gratuit)")
         engine.feed = feed
-        coros = [feed.run(), engine.housekeeping(), engine.journal.run(), engine.run_trending()]
+        engine.token_feed = tokens
+        coros += [engine.housekeeping(), engine.journal.run(), engine.run_trending()]
         trader = await build_trader(settings, engine, http, feed)
         if trader:
             coros.append(trader.run())

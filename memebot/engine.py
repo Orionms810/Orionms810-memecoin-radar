@@ -136,6 +136,7 @@ class Engine:
         self.alerts_sent = 0
         self.sol_usd: float | None = None
         self.trader: Any = None  # trading.trader.Trader si le trading est activé
+        self.token_feed: Any = None  # flux des nouveaux tokens (PumpPortal), si différent de feed
         self.tg_channels: Any = None  # sources.telegram_channels si configuré
         self.journal = CandidateJournal(storage)
         self.journal.release = self.release_mint
@@ -582,10 +583,13 @@ class Engine:
                 return 'Trading désactivé (mode = "off" dans config.toml, section [trading]).'
             return await self.trader.handle_command(cmd, arg)
         if cmd == "/status":
-            ws = "connecté" if self.feed and self.feed.connected else "déconnecté"
+            def state(f: Any) -> str:
+                return "connecté" if f and f.connected else "déconnecté"
             sol = f"${self.sol_usd:.0f}" if self.sol_usd else "?"
+            tokens_feed = self.token_feed or self.feed
             return (f"⚙️ <b>Status</b>\nEn ligne depuis {fmt_age(time.time() - self.started)}\n"
-                    f"Flux pump.fun : {ws} · {self.tokens_seen} tokens vus\n"
+                    f"Nouveaux tokens : {state(tokens_feed)} · {self.tokens_seen} vus\n"
+                    f"Trades : {state(self.feed)} · {getattr(self.feed, 'messages', 0)} messages reçus\n"
                     f"Narratifs actifs : {len(self.book.live())} · tokens surveillés : "
                     f"{len(self.candidates)} · alertes : {self.alerts_sent}\n"
                     f"Tendance : {'on' if self.trend_enabled else 'off'} "

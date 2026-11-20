@@ -320,6 +320,11 @@ Nugget Nation ($NN)
 ## Limites connues
 
 - PumpPortal et l'API pump.fun sont **non officielles** : leur format peut changer.
+- Depuis mai 2026, PumpPortal ne fournit plus les **trades** gratuitement (seulement
+  les nouveaux tokens). Le bot lit donc les achats/ventes **directement sur la
+  blockchain** via ta clé RPC (Helius gratuit) ; une clé `PUMPPORTAL_API_KEY`
+  (payante) reste possible. Après la migration d'un token vers PumpSwap, ses trades
+  ne sont plus suivis.
 - La réactivité dépend de la source : X est interrogé toutes les 20 s, le RSS
   Truth Social ajoute son propre délai.
 - Le matching par mots-clés rate les tokens nommés uniquement en emoji ou dans

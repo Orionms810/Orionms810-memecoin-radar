@@ -22,10 +22,12 @@ URL = "wss://pumpportal.fun/api/data"
 
 class PumpPortalClient:
     def __init__(self, on_new_token: Callable[[NewToken], None],
-                 on_trade: Callable[[Trade], None], url: str = URL):
+                 on_trade: Callable[[Trade], None], url: str = URL,
+                 api_key: str | None = None):
         self.on_new_token = on_new_token
         self.on_trade = on_trade
-        self.url = url
+        # Depuis mai 2026, les trades ne sont envoyés qu'avec une clé API (payante).
+        self.url = f"{url}?api-key={api_key}" if api_key else url
         self._ws = None
         self._trade_keys: set[str] = set()
         self.connected = False

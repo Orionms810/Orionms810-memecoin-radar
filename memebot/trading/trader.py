@@ -362,14 +362,16 @@ class Trader:
             for pos in list(self.positions.values()):
                 self._check_exits(pos)
             now = time.time()
-            if now - last_equity_check > (60 if self.mode == "live" else every):
+            if now - last_equity_check > 60:
                 last_equity_check = now
+                halted = None
                 cash = await self._safe_cash()
                 if cash is not None:
                     halted = self.guard.update_equity(self.equity_from(cash))
                     if halted:
                         await self._notify(f"🛑 <b>Trading arrêté</b> : {escape(halted)}")
-                self._save()
+                if self.positions or halted:
+                    self._save()
             await asyncio.sleep(every)
 
     # --------------------------------------------------------------- commandes

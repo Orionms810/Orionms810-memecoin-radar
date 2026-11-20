@@ -78,6 +78,8 @@ class Settings:
     trading: TradingSettings = field(default_factory=TradingSettings)
     trend: TrendSettings = field(default_factory=TrendSettings)
     wallet_secret: str | None = None  # clé privée du wallet dédié (mode réel uniquement)
+    pumpportal_api_key: str | None = None  # optionnel et payant : trades via PumpPortal
+    solana_ws_url: str | None = None  # websocket RPC (sinon déduit de SOLANA_RPC_URL)
 
     # chaînes Telegram (compte utilisateur via Telethon)
     tg_api_id: int | None = None
@@ -160,6 +162,8 @@ def load_settings(config_path: str | Path = "config.toml", env_path: str | Path 
     s.x_bearer = os.getenv("X_BEARER_TOKEN") or None
     s.rpc_url = os.getenv("SOLANA_RPC_URL") or s.rpc_url
     s.wallet_secret = os.getenv("WALLET_PRIVATE_KEY") or None
+    s.pumpportal_api_key = (os.getenv("PUMPPORTAL_API_KEY") or "").strip() or None
+    s.solana_ws_url = (os.getenv("SOLANA_WS_URL") or "").strip() or None
     tg_id = (os.getenv("TG_API_ID") or "").strip()
     s.tg_api_id = int(tg_id) if tg_id.isdigit() else None
     s.tg_api_hash = (os.getenv("TG_API_HASH") or "").strip() or None
