@@ -56,6 +56,7 @@ HELP = """🤖 <b>Memecoin Radar</b> — commandes
 /narratif &lt;mots&gt; — surveiller un narratif à la main (ex : /narratif covfefe, $COVF)
 /narratifs — narratifs actifs
 /tendance — tokens qui décollent sans news : /tendance on · /tendance off
+/tendance achats off — la tendance observe sans acheter (/tendance achats on pour réactiver)
 /supprimer &lt;id&gt; — arrêter un narratif (ex : /supprimer N3)
 /bilan — bilan « paper trading » des alertes
 /analyse — ce que sont devenus les tokens alertés ET refusés
@@ -155,6 +156,9 @@ class Engine:
                             announce=False))
         saved = storage.kv_get("trend_enabled", None)
         self.trend_enabled = settings.trend.enabled if saved is None else bool(saved)
+        saved_trade = storage.kv_get("trend_trade", None)
+        if saved_trade is not None:  # choix fait avec /tendance achats on|off
+            settings.trend.trade = bool(saved_trade)
         self.probation: dict[str, Probe] = {}
         self._trend_checks: deque[float] = deque()
 
@@ -572,7 +576,11 @@ class Engine:
             self.notifier.muted = False
             return "🔔 Alertes réactivées."
         if cmd == "/tendance":
-            if arg.lower() in ("on", "off"):
+            words = arg.lower().split()
+            if len(words) == 2 and words[0] in ("achats", "achat") and words[1] in ("on", "off"):
+                self.s.trend.trade = words[1] == "on"
+                self.storage.kv_set("trend_trade", self.s.trend.trade)
+            elif arg.lower() in ("on", "off"):
                 self.set_trend(arg.lower() == "on")
             t = self.s.trend
             state = "✅ activée" if self.trend_enabled else "⏹ désactivée"
@@ -582,8 +590,8 @@ class Engine:
                     f"Déclenchement : ≥ {t.min_buy_sol:g} SOL entrés (hors dev), courbe "
                     f"≥ {t.min_progress_pct:g}%, entre {t.min_age_seconds:g} et "
                     f"{t.window_seconds:g} s après le lancement\n"
-                    f"Trading papier sur ces tokens : {'oui' if t.trade else 'non'}\n"
-                    "/tendance on · /tendance off")
+                    f"Achats papier sur ces tokens : {'oui' if t.trade else 'non (observation seule)'}\n"
+                    "/tendance on · /tendance off · /tendance achats on · /tendance achats off")
         if cmd == "/analyse":
             return format_analysis(self.storage.candidate_rows(self.journal_since))
         if cmd == "/export":

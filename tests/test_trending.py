@@ -151,3 +151,16 @@ async def test_trader_buys_trend_tokens_only_if_allowed(setup):
     assert tok2.mint in trader.positions
     for t in list(trader.tasks):
         t.cancel()
+
+
+async def test_trend_buying_toggle_is_remembered(setup):
+    engine, notifier, feed, data = setup
+    assert engine.s.trend.trade is True
+    reply = await engine.handle_command("/tendance achats off")
+    assert "observation seule" in reply and engine.s.trend.trade is False
+    assert engine.trend_enabled  # la tendance continue d'observer
+    again = Engine(engine.s, engine.storage, RecordingNotifier(), data, RecordingFeed())
+    again.s.trend.trade = True  # même si la config dit oui...
+    again2 = Engine(again.s, engine.storage, RecordingNotifier(), data, RecordingFeed())
+    assert again2.s.trend.trade is False  # ...le choix fait sur Telegram est gardé
+    assert "Achats papier sur ces tokens : oui" in await engine.handle_command("/tendance achats on")

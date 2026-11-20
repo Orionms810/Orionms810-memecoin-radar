@@ -276,6 +276,7 @@ avec `tmux`, `screen` ou un service `systemd`.
 | `/narratif covfefe, $COVF` | Surveille un narratif à la main (une news vue à la télé...) |
 | `/narratifs` | Liste les narratifs actifs |
 | `/tendance` · `/tendance on` · `/tendance off` | Stratégie tendance (tokens qui décollent sans news) |
+| `/tendance achats off` · `/tendance achats on` | La tendance observe et note sans acheter / réactive ses achats papier |
 | `/supprimer N3` | Arrête un narratif |
 | `/bilan` | Bilan paper trading des alertes |
 | `/analyse` | Ce que sont devenus **tous** les tokens repérés (alertés et refusés) 30 min après |
