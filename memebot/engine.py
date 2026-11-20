@@ -140,6 +140,12 @@ class Engine:
         self.tg_channels: Any = None  # sources.telegram_channels si configuré
         self.journal = CandidateJournal(storage)
         self.journal.release = self.release_mint
+        # Avant le flux de trades on-chain (nov. 2026), aucun trade n'arrivait : les
+        # lignes du journal de cette période sont fausses (tout à x1.00). On les ignore.
+        self.journal_since = storage.kv_get("journal_since")
+        if self.journal_since is None:
+            self.journal_since = time.time()
+            storage.kv_set("journal_since", self.journal_since)
         # Stratégie « tendance » : un pseudo-narratif qui ne matche aucun mot-clé
         self.trend_narrative = Narrative(
             id=TREND_ID, keywords={}, created_at=time.time(), expires_at=float("inf"),
@@ -562,9 +568,9 @@ class Engine:
                     f"Trading papier sur ces tokens : {'oui' if t.trade else 'non'}\n"
                     "/tendance on · /tendance off")
         if cmd == "/analyse":
-            return format_analysis(self.storage.candidate_rows())
+            return format_analysis(self.storage.candidate_rows(self.journal_since))
         if cmd == "/export":
-            rows = self.storage.candidate_rows()
+            rows = self.storage.candidate_rows(self.journal_since)
             if not rows:
                 return "Aucun candidat enregistré pour l'instant."
             name = time.strftime("candidats-%Y%m%d-%H%M.csv")

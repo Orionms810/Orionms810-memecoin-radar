@@ -116,6 +116,7 @@ async def test_export_command_sends_file(tmp_path):
             return True
 
     storage, j, t0 = make_rows(tmp_path)
+    storage.kv_set("journal_since", 0)  # lignes collectées avec le flux de trades
     engine = Engine(Settings(), storage, FileNotifier(), FakeData(), RecordingFeed())
     assert await engine.handle_command("/export") is None
     name, content = FileNotifier.files[0]
@@ -137,3 +138,19 @@ async def test_notifier_send_document():
     assert seen["path"].endswith("/sendDocument")
     assert b'filename="x.csv"' in seen["body"] and b"legende" in seen["body"]
     assert await Notifier(None, None, None, console=False).send_document("x.csv", b"") is False
+
+
+async def test_rows_from_before_the_trade_feed_fix_are_ignored(tmp_path):
+    from memebot.config import Settings
+    from memebot.demo import FakeData
+    from memebot.engine import Engine
+
+    from .test_engine import RecordingFeed, RecordingNotifier
+
+    storage, j, t0 = make_rows(tmp_path)  # anciennes lignes (sans trades)
+    await j.tick(t0 + 1801)
+    engine = Engine(Settings(), storage, RecordingNotifier(), FakeData(), RecordingFeed())
+    assert "Pas encore assez" in await engine.handle_command("/analyse")
+    assert "Aucun candidat" in await engine.handle_command("/export")
+    again = Engine(Settings(), storage, RecordingNotifier(), FakeData(), RecordingFeed())
+    assert again.journal_since == engine.journal_since  # date fixée une seule fois
