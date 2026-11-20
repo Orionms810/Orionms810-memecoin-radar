@@ -137,6 +137,7 @@ class Engine:
         self.sol_usd: float | None = None
         self.trader: Any = None  # trading.trader.Trader si le trading est activé
         self.token_feed: Any = None  # flux des nouveaux tokens (PumpPortal), si différent de feed
+        self._seen_mints: dict[str, None] = {}
         self.tg_channels: Any = None  # sources.telegram_channels si configuré
         self.journal = CandidateJournal(storage)
         self.journal.release = self.release_mint
@@ -222,6 +223,11 @@ class Engine:
 
     # ----------------------------------------------------------------- tokens
     def on_new_token(self, token: NewToken) -> None:
+        if token.mint in self._seen_mints:  # reçu aussi par l'autre source
+            return
+        self._seen_mints[token.mint] = None
+        if len(self._seen_mints) > 50_000:
+            self._seen_mints.pop(next(iter(self._seen_mints)))
         self.tokens_seen += 1
         self.storage.add_token(token)
         self.baseline.add(token.name, token.symbol)
@@ -592,9 +598,14 @@ class Engine:
             def state(f: Any) -> str:
                 return "connecté" if f and f.connected else "déconnecté"
             sol = f"${self.sol_usd:.0f}" if self.sol_usd else "?"
-            tokens_feed = self.token_feed or self.feed
+            sources = []
+            if hasattr(self.feed, "creations_ok"):
+                sources.append(f"blockchain {'✅' if self.feed.creations_ok else '❌'}")
+            pp = self.token_feed if self.token_feed is not None else self.feed
+            if pp is not None and not hasattr(pp, "creations_ok"):
+                sources.append(f"PumpPortal {'✅' if pp.connected else '❌'}")
             return (f"⚙️ <b>Status</b>\nEn ligne depuis {fmt_age(time.time() - self.started)}\n"
-                    f"Nouveaux tokens : {state(tokens_feed)} · {self.tokens_seen} vus\n"
+                    f"Nouveaux tokens : {' · '.join(sources) or '?'} · {self.tokens_seen} vus\n"
                     f"Trades : {state(self.feed)} · {getattr(self.feed, 'messages', 0)} messages reçus\n"
                     f"Narratifs actifs : {len(self.book.live())} · tokens surveillés : "
                     f"{len(self.candidates)} · alertes : {self.alerts_sent}\n"

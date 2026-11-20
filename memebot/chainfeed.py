@@ -12,6 +12,11 @@ discriminant bddb7fd34ee661ee, puis mint (32 octets), sol_amount (u64),
 token_amount (u64), is_buy (bool), user (32), timestamp (i64),
 virtual_sol_reserves (u64), virtual_token_reserves (u64), ...
 
+Nouveaux tokens : on s'abonne aussi au compte « mint_authority » de pump.fun
+(TSLvdd1pWpHVjahSpsvCXUbgwsL3JAcvokwaKt1eokM, PDA ["mint-authority"]), qui
+n'apparaît que dans les instructions create et create_v2 : on reçoit chaque
+création (CreateEvent, discriminant 1b72a94ddeeb6376) sans le flot des trades.
+
 Limite : après la migration d'un token vers PumpSwap, ses trades ne passent
 plus par ce programme et ne sont plus vus.
 """
@@ -28,11 +33,13 @@ from typing import Any, Callable
 
 import websockets
 
-from .models import Trade
+from .models import NewToken, Trade
 
 log = logging.getLogger(__name__)
 
 TRADE_DISCRIMINATOR = bytes.fromhex("bddb7fd34ee661ee")
+CREATE_DISCRIMINATOR = bytes.fromhex("1b72a94ddeeb6376")
+MINT_AUTHORITY = "TSLvdd1pWpHVjahSpsvCXUbgwsL3JAcvokwaKt1eokM"
 PROGRAM_DATA = "Program data: "
 _MIN_LEN = 8 + 32 + 8 + 8 + 1 + 32 + 8 + 8 + 8  # jusqu'à virtual_token_reserves
 _B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
@@ -92,13 +99,75 @@ def decode_trades(logs: list[str], now: float | None = None) -> list[Trade]:
     return trades
 
 
+def _program_data(logs: list[str]) -> list[bytes]:
+    out = []
+    for line in logs or []:
+        if isinstance(line, str) and line.startswith(PROGRAM_DATA):
+            try:
+                out.append(base64.b64decode(line[len(PROGRAM_DATA):].strip(), validate=True))
+            except (ValueError, TypeError):
+                continue
+    return out
+
+
+def _read_str(data: bytes, o: int) -> tuple[str, int]:
+    (n,) = struct.unpack_from("<I", data, o)
+    if n > 512:
+        raise ValueError("chaîne trop longue")
+    raw = data[o + 4:o + 4 + n]
+    if len(raw) != n:
+        raise ValueError("données tronquées")
+    return raw.decode("utf-8", errors="replace"), o + 4 + n
+
+
+def decode_creations(logs: list[str], signature: str = "",
+                     now: float | None = None) -> list[NewToken]:
+    """Extrait les nouveaux tokens (CreateEvent) et l'achat initial du dev."""
+    now = now or time.time()
+    trades = decode_trades(logs, now)
+    tokens: list[NewToken] = []
+    for data in _program_data(logs):
+        if data[:8] != CREATE_DISCRIMINATOR:
+            continue
+        try:
+            o = 8
+            name, o = _read_str(data, o)
+            symbol, o = _read_str(data, o)
+            uri, o = _read_str(data, o)
+            mint = b58encode(data[o:o + 32]); o += 32
+            bonding_curve = b58encode(data[o:o + 32]); o += 32
+            user = b58encode(data[o:o + 32]); o += 32
+            o += 32  # creator (on garde « user » : c'est lui qui détient l'achat du dev)
+            timestamp, v_tok, v_sol = struct.unpack_from("<qQQ", data, o)
+        except (ValueError, struct.error):
+            continue
+        if v_tok <= 0 or abs(timestamp - now) > 86400:
+            continue
+        dev = [t for t in trades if t.mint == mint and t.trader == user and t.is_buy]
+        last = dev[-1] if dev else None
+        tokens.append(NewToken(
+            mint=mint, name=name, symbol=symbol, creator=user, uri=uri,
+            initial_buy=sum(t.token_amount for t in dev),
+            sol_amount=sum(t.sol_amount for t in dev),
+            market_cap_sol=last.market_cap_sol if last else v_sol * 1e6 / v_tok,
+            bonding_curve=bonding_curve,
+            v_tokens=last.v_tokens if last else v_tok / 1e6,
+            signature=signature, pool="pump", created_at=now,
+        ))
+    return tokens
+
+
 class SolanaTradeFeed:
     """Même interface que PumpPortalClient pour les trades (subscribe/unsubscribe)."""
 
     def __init__(self, ws_url: str, on_trade: Callable[[Trade], None], *, max_subs: int = 900,
-                 connect_kwargs: dict[str, Any] | None = None):
+                 connect_kwargs: dict[str, Any] | None = None,
+                 on_new_token: Callable[[NewToken], None] | None = None):
         self.ws_url = ws_url
         self.on_trade = on_trade
+        self.on_new_token = on_new_token
+        self._create_sub: int | None = None
+        self.creations = 0
         self.max_subs = max_subs
         self.connect_kwargs = connect_kwargs or {}
         self.connected = False
@@ -122,7 +191,13 @@ class SolanaTradeFeed:
                     self._sub_of.clear()
                     self._mint_of.clear()
                     self._pending.clear()
+                    self._create_sub = None
                     self.connected = True
+                    if self.on_new_token:
+                        req = await self._send({"method": "logsSubscribe", "params": [
+                            {"mentions": [MINT_AUTHORITY]}, {"commitment": "confirmed"}]})
+                        if req is not None:
+                            self._pending[req] = ("create", MINT_AUTHORITY)
                     log.info("Trades Solana : connecté (%d tokens suivis)", len(self._wanted))
                     for mint in list(self._wanted):
                         await self._send_subscribe(mint)
@@ -138,6 +213,7 @@ class SolanaTradeFeed:
             finally:
                 self._ws = None
                 self.connected = False
+                self._create_sub = None
             await asyncio.sleep(backoff)
             backoff = min(backoff * 2, 60.0)
 
@@ -150,6 +226,14 @@ class SolanaTradeFeed:
             return
         if "id" in msg and msg.get("id") in self._pending:
             action, mint = self._pending.pop(msg["id"])
+            if action == "create":
+                if isinstance(msg.get("result"), int):
+                    self._create_sub = msg["result"]
+                    log.info("Nouveaux tokens : lus sur la blockchain")
+                else:
+                    log.warning("Nouveaux tokens : abonnement refusé (%s)",
+                                (msg.get("error") or {}).get("message"))
+                return
             if action == "sub":
                 if "error" in msg:
                     log.warning("Trades Solana : abonnement refusé pour %s (%s)", mint,
@@ -167,8 +251,17 @@ class SolanaTradeFeed:
         if msg.get("method") != "logsNotification":
             return
         params = msg.get("params") or {}
-        mint = self._mint_of.get(params.get("subscription"))
         value = ((params.get("result") or {}).get("value")) or {}
+        if self._create_sub is not None and params.get("subscription") == self._create_sub:
+            if value.get("err") is None and self.on_new_token:
+                for token in decode_creations(value.get("logs") or [], value.get("signature") or ""):
+                    self.creations += 1
+                    try:
+                        self.on_new_token(token)
+                    except Exception:  # noqa: BLE001
+                        log.exception("Nouveaux tokens : erreur en traitant %s", token.mint)
+            return
+        mint = self._mint_of.get(params.get("subscription"))
         if mint is None or value.get("err") is not None:
             return
         for trade in decode_trades(value.get("logs") or []):
@@ -177,6 +270,10 @@ class SolanaTradeFeed:
                     self.on_trade(trade)
                 except Exception:  # noqa: BLE001 - un trade bizarre ne doit pas couper le flux
                     log.exception("Trades Solana : erreur en traitant un trade")
+
+    @property
+    def creations_ok(self) -> bool:
+        return self.connected and self._create_sub is not None
 
     # -------------------------------------------------------- abonnements
     async def _send(self, payload: dict[str, Any]) -> int | None:

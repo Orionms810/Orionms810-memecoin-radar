@@ -122,3 +122,97 @@ async def test_subscription_limit():
     await feed.unsubscribe_trades(["A"])
     await feed.subscribe_trades(["C"])
     assert feed._wanted == {"B", "C"}
+
+
+BC = bytes([3] * 32)
+CREATOR_FIELD = bytes([4] * 32)
+
+
+def create_log(name=b"Nugget", symbol=b"NUG", uri=b"https://ipfs.io/ipfs/Qm", mint=MINT, user=USER,
+               ts=None, v_tok=1_073_000_000_000_000, v_sol=30_000_000_000, name_len=None):
+    from memebot.chainfeed import CREATE_DISCRIMINATOR
+
+    ts = int(time.time()) if ts is None else ts
+
+    def s(b, n=None):
+        return struct.pack("<I", len(b) if n is None else n) + b
+
+    payload = (CREATE_DISCRIMINATOR + s(name, name_len) + s(symbol) + s(uri) + mint + BC + user
+               + CREATOR_FIELD + struct.pack("<qQQQQ", ts, v_tok, v_sol, 1, 1) + b"\0" * 80)
+    return "Program data: " + base64.b64encode(payload).decode()
+
+
+def test_decode_creation_with_dev_buy():
+    from memebot.chainfeed import decode_creations
+
+    logs = ["Program log: Instruction: Create", create_log(), "Program log: Instruction: Buy",
+            trade_log(sol=2_000_000_000, tokens=70_000_000_000_000, v_sol=32_000_000_000,
+                      v_tok=1_003_000_000_000_000)]
+    tokens = decode_creations(logs, "sig123")
+    assert len(tokens) == 1
+    t = tokens[0]
+    assert (t.name, t.symbol, t.uri) == ("Nugget", "NUG", "https://ipfs.io/ipfs/Qm")
+    assert t.mint == b58encode(MINT) and t.creator == b58encode(USER)
+    assert t.bonding_curve == b58encode(BC) and t.signature == "sig123"
+    assert t.initial_buy == 70_000_000 and t.sol_amount == 2.0
+    assert round(t.dev_buy_pct, 1) == 7.0
+    assert t.market_cap_sol == pytest.approx(32e9 * 1e6 / 1.003e15)  # après l'achat du dev
+
+
+def test_decode_creation_without_buy_and_corrupt_data():
+    from memebot.chainfeed import decode_creations
+
+    t = decode_creations([create_log()])[0]
+    assert t.initial_buy == 0 and t.market_cap_sol == pytest.approx(27.96, abs=0.01)
+    assert decode_creations([create_log(name_len=10_000)]) == []  # longueur absurde
+    assert decode_creations([create_log(ts=0)]) == []
+    assert decode_creations([trade_log()]) == []  # un trade seul n'est pas une création
+
+
+async def test_feed_receives_creations(no_proxy):
+    from memebot.chainfeed import MINT_AUTHORITY
+
+    created = []
+
+    async def handler(ws):
+        async for raw in ws:
+            req = json.loads(raw)
+            if req["method"] == "logsSubscribe" and req["params"][0]["mentions"] == [MINT_AUTHORITY]:
+                await ws.send(json.dumps({"jsonrpc": "2.0", "id": req["id"], "result": 77}))
+                await ws.send(json.dumps({"jsonrpc": "2.0", "method": "logsNotification", "params": {
+                    "subscription": 77, "result": {"value": {
+                        "signature": "abc", "err": None, "logs": [create_log()]}}}}))
+
+    async with websockets.serve(handler, "127.0.0.1", 0) as server:
+        port = server.sockets[0].getsockname()[1]
+        feed = SolanaTradeFeed(f"ws://127.0.0.1:{port}", lambda t: None,
+                               on_new_token=created.append, connect_kwargs={"proxy": None})
+        task = asyncio.ensure_future(feed.run())
+        for _ in range(100):
+            await asyncio.sleep(0.02)
+            if created:
+                break
+        assert feed.creations_ok and feed.creations == 1
+        assert created[0].symbol == "NUG" and created[0].signature == "abc"
+        task.cancel()
+
+
+async def test_engine_ignores_duplicate_tokens_from_two_sources(tmp_path):
+    from memebot.chainfeed import decode_creations
+    from memebot.config import Settings
+    from memebot.demo import FakeData
+    from memebot.engine import Engine
+    from memebot.storage import Storage
+
+    from .test_engine import RecordingFeed, RecordingNotifier
+
+    engine = Engine(Settings(), Storage(tmp_path / "d.db"), RecordingNotifier(), FakeData(),
+                    RecordingFeed())
+    token = decode_creations([create_log()])[0]
+    engine.on_new_token(token)
+    engine.on_new_token(decode_creations([create_log()])[0])  # même token via PumpPortal
+    assert engine.tokens_seen == 1
+    status = await engine.handle_command("/status")
+    assert "Nouveaux tokens" in status and "1 vus" in status
+    for t in list(engine.tasks):
+        t.cancel()

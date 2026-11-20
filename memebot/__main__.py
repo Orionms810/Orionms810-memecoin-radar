@@ -149,7 +149,7 @@ async def run_live(settings: Settings) -> None:
             log.info("Trades : PumpPortal (clé API)")
         else:  # gratuit : trades lus sur la blockchain via le RPC (Helius)
             feed = SolanaTradeFeed(settings.solana_ws_url or ws_url_from_rpc(settings.rpc_url),
-                                   engine.on_trade)
+                                   engine.on_trade, on_new_token=engine.on_new_token)
             coros = [tokens.run(), feed.run()]
             log.info("Trades : lus sur la blockchain Solana (gratuit)")
         engine.feed = feed
