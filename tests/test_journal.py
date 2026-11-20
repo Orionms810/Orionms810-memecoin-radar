@@ -1,6 +1,7 @@
 import time
 
 import httpx
+import pytest
 
 from memebot.journal import (
     ALERT,
@@ -30,15 +31,9 @@ def trade(mint, mcap, trader="x", buy=True):
                  new_balance=None, market_cap_sol=mcap)
 
 
-async def test_checkpoints_and_release(tmp_path):
+async def test_checkpoints_from_trades(tmp_path):
     storage = Storage(tmp_path / "j.db")
-    released = []
     j = CandidateJournal(storage)
-
-    async def release(mint):
-        released.append(mint)
-    j.release = release
-
     tok = token()
     stats = TradeStats.for_token(tok)
     stats.last_mcap = 40.0
@@ -57,10 +52,34 @@ async def test_checkpoints_and_release(tmp_path):
     await j.tick(t0 + 1801)
     row = storage.candidate_rows()[0]
     assert row["mcap_15"] == 20 and row["mcap_30"] == 20 and row["max_mcap_30"] == 80
-    assert row["creator_sold_30"] == 1 and not j.holds(tok.mint) and released == [tok.mint]
+    assert row["creator_sold_30"] == 1 and not j.holds(tok.mint)
 
     j.set_trade(row_id, True, "acheté")
     assert storage.candidate_rows()[0]["traded"] == 1
+
+
+async def test_prices_read_from_bonding_curves(tmp_path):
+    from memebot.curves import CurveState
+
+    asked = []
+    state = {"mcap_lamports": 90_000_000_000}
+
+    async def fetch(addresses):
+        asked.append(list(addresses))
+        return {"CURVE": CurveState(v_token_raw=10**15, v_sol_lamports=state["mcap_lamports"],
+                                    real_sol_lamports=0, complete=False)}
+
+    j = CandidateJournal(Storage(tmp_path / "c.db"), fetch_curves=fetch)
+    tok = token()
+    tok.bonding_curve = "CURVE"
+    t0 = time.time()
+    j.record(token=tok, report=report(tok), stats=None, decision=ALERT, detail="", now=t0)
+    await j.tick(t0 + 301)  # courbe à 90 SOL de market cap
+    state["mcap_lamports"] = 15_000_000_000
+    await j.tick(t0 + 1801)  # puis effondrée à 15 SOL
+    row = j.storage.candidate_rows()[0]
+    assert row["mcap_5"] == pytest.approx(90) and row["mcap_30"] == pytest.approx(15)
+    assert row["max_mcap_30"] == pytest.approx(90) and asked[0] == ["CURVE"]
 
 
 async def test_tracking_limit(tmp_path):

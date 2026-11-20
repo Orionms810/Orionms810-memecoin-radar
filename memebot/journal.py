@@ -44,15 +44,18 @@ class Tracked:
     last_mcap: float
     max_mcap: float
     creator_sold: bool = False
+    bonding_curve: str = ""
     done: set[str] = field(default_factory=set)
 
 
 class CandidateJournal:
-    def __init__(self, storage: Storage, *, max_tracked: int = 150):
+    def __init__(self, storage: Storage, *, max_tracked: int = 150,
+                 fetch_curves: Callable[[list[str]], Awaitable[dict[str, Any]]] | None = None):
         self.storage = storage
         self.max_tracked = max_tracked
         self.tracked: dict[str, Tracked] = {}
-        self.release: Callable[[str], Awaitable[None]] | None = None
+        # Le prix est lu sur la bonding curve (lecture groupée), sans écouter les trades.
+        self.fetch_curves = fetch_curves
 
     def holds(self, mint: str) -> bool:
         return mint in self.tracked
@@ -102,7 +105,8 @@ class CandidateJournal:
         if mcap > 0 and len(self.tracked) < self.max_tracked:
             self.tracked[token.mint] = Tracked(row_id=row_id, mint=token.mint, creator=token.creator,
                                                t0=now, last_mcap=mcap, max_mcap=mcap,
-                                               creator_sold=bool(stats and stats.creator_sold))
+                                               creator_sold=bool(stats and stats.creator_sold),
+                                               bonding_curve=token.bonding_curve)
         return row_id
 
     def set_trade(self, row_id: int, bought: bool, reason: str) -> None:
@@ -119,8 +123,22 @@ class CandidateJournal:
         if not trade.is_buy and trade.trader == t.creator:
             t.creator_sold = True
 
+    async def _refresh_prices(self) -> None:
+        if not self.fetch_curves:
+            return
+        tracked = [t for t in self.tracked.values() if t.bonding_curve]
+        if not tracked:
+            return
+        curves = await self.fetch_curves([t.bonding_curve for t in tracked])
+        for t in tracked:
+            c = curves.get(t.bonding_curve)
+            if c is not None and c.market_cap_sol > 0:
+                t.last_mcap = c.market_cap_sol
+                t.max_mcap = max(t.max_mcap, c.market_cap_sol)
+
     async def tick(self, now: float | None = None) -> None:
         now = now or time.time()
+        await self._refresh_prices()
         for t in list(self.tracked.values()):
             updates: dict[str, Any] = {}
             for col, delay in CHECKPOINTS:
@@ -133,10 +151,8 @@ class CandidateJournal:
                 self.storage.update_candidate(t.row_id, updates)
             if len(t.done) == len(CHECKPOINTS):
                 del self.tracked[t.mint]
-                if self.release:
-                    await self.release(t.mint)
 
-    async def run(self, every: float = 15.0) -> None:
+    async def run(self, every: float = 60.0) -> None:
         while True:
             try:
                 await self.tick()

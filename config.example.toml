@@ -123,15 +123,15 @@ dead_tokens_warn = 3        # anciens tokens du créateur morts sans décoller
 [trending]
 # Stratégie « tendance » : tokens qui décollent tout seuls, sans news (alertes 🔥).
 # On/off à chaud depuis Telegram : /tendance on · /tendance off
+# Les tokens sont observés en lisant leur bonding curve en groupe (peu de crédits RPC).
 enabled = true
 window_seconds = 180        # observe chaque nouveau token pendant ses 3 premières minutes
 min_age_seconds = 30        # jamais avant 30 s (les faux acheteurs achètent dès la 1re seconde)
-min_buyers = 20             # acheteurs différents (hors créateur)
-min_buy_sol = 4.0           # SOL achetés au total
+min_buy_sol = 4.0           # SOL entrés dans la courbe, hors achat du dev
 min_progress_pct = 10       # avancement de la bonding curve
-min_buy_sell_ratio = 2.0    # au moins 2 fois plus d'achats que de ventes (en SOL)
-max_checks_per_hour = 10    # analyses complètes max par heure (économise ta clé Helius)
-max_probes = 150            # tokens observés en même temps
+poll_seconds = 15           # lecture des courbes toutes les 15 s (1 requête pour 100 tokens)
+max_checks_per_hour = 6     # analyses complètes max par heure (économise ta clé Helius)
+max_probes = 100            # tokens observés en même temps
 trade = true                # le trader (papier) peut acheter ces tokens
 
 [trading]

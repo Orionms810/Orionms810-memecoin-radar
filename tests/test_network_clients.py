@@ -221,3 +221,34 @@ async def test_x_source_uses_start_time_when_first_page_empty():
         await src._poll(acc)
     assert "start_time" not in seen_params[0]
     assert seen_params[1]["start_time"] == acc.seeded_at
+
+
+async def test_live_data_reads_bonding_curves_in_batches():
+    import base64 as b64
+    import struct
+
+    from memebot.curves import CURVE_DISCRIMINATOR
+
+    calls = []
+
+    def account(v_tok, v_sol, real_sol, complete):
+        raw = (CURVE_DISCRIMINATOR + struct.pack("<QQQQQ", v_tok, v_sol, 0, real_sol, 10**15)
+               + bytes([1 if complete else 0]) + b"\0" * 40)
+        return {"data": [b64.b64encode(raw).decode(), "base64"], "owner": "6EF8"}
+
+    def handler(req: httpx.Request):
+        body = json.loads(req.content)
+        addrs = body["params"][0]
+        calls.append(len(addrs))
+        value = [account(10**15, 60 * 10**9, 5 * 10**9, a == "C1") if a != "GONE" else None
+                 for a in addrs]
+        return httpx.Response(200, json={"result": {"value": value}})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+        data = LiveData(http, "https://rpc")
+        addrs = [f"C{i}" for i in range(150)] + ["GONE", "C0"]
+        curves = await data.curves(addrs)
+    assert calls == [100, 51]  # 100 comptes max par requête, doublons retirés
+    assert "GONE" not in curves and len(curves) == 150
+    assert curves["C1"].complete and not curves["C2"].complete
+    assert curves["C2"].real_sol == 5.0 and curves["C2"].market_cap_sol == 60.0

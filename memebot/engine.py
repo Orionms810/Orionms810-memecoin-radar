@@ -43,7 +43,7 @@ from .risk import assess_risk, momentum_score
 from .storage import Storage
 from .telegram import Notifier
 from .text import extract_keywords, manual_keywords
-from .trending import TREND_ID, Probe, trend_trigger
+from .trending import TREND_ID, Probe, curve_trigger
 
 if TYPE_CHECKING:  # l'IA est optionnelle (module anthropic)
     from .ai import AIAnalyst
@@ -83,6 +83,7 @@ class DataProvider(Protocol):
     async def pump_coin(self, mint: str) -> dict[str, Any] | None: ...
     async def dexscreener(self, mint: str) -> DexInfo | None: ...
     async def funding(self, buyers: list[str], *, creator: str | None = None) -> Any: ...
+    async def curves(self, addresses: list[str]) -> dict[str, Any]: ...
     async def sol_usd(self) -> float | None: ...
 
 
@@ -139,8 +140,7 @@ class Engine:
         self.token_feed: Any = None  # flux des nouveaux tokens (PumpPortal), si différent de feed
         self._seen_mints: dict[str, None] = {}
         self.tg_channels: Any = None  # sources.telegram_channels si configuré
-        self.journal = CandidateJournal(storage)
-        self.journal.release = self.release_mint
+        self.journal = CandidateJournal(storage, fetch_curves=self._fetch_curves)
         # Avant le flux de trades on-chain (nov. 2026), aucun trade n'arrivait : les
         # lignes du journal de cette période sont fausses (tout à x1.00). On les ignore.
         self.journal_since = storage.kv_get("journal_since")
@@ -260,9 +260,14 @@ class Engine:
                  narr.id, m.score, ", ".join(m.keywords))
         self._add_candidate(token, m, self.s.observe_seconds)
 
-    def _add_candidate(self, token: NewToken, m: MatchResult, delay: float) -> None:
-        probe = self.probation.pop(token.mint, None)  # garde ce qu'on a déjà observé
-        stats = probe.stats if probe else TradeStats.for_token(token)
+    def _add_candidate(self, token: NewToken, m: MatchResult, delay: float,
+                       curve: Any = None) -> None:
+        self.probation.pop(token.mint, None)
+        stats = TradeStats.for_token(token)
+        if curve is not None:  # point de départ : l'état actuel de la courbe
+            stats.last_mcap = curve.market_cap_sol
+            stats.max_mcap = max(stats.max_mcap, curve.market_cap_sol)
+            stats.last_v_tokens = curve.v_tokens
         cand = Candidate(token=token, match=m, stats=stats)
         self.candidates[token.mint] = cand
         if self.feed:
@@ -273,58 +278,64 @@ class Engine:
     def _start_probe(self, token: NewToken) -> None:
         if token.mint in self.probation or len(self.probation) >= self.s.trend.max_probes:
             return
-        self.probation[token.mint] = Probe(token=token, stats=TradeStats.for_token(token),
+        if not token.bonding_curve:
+            return  # sans adresse de courbe, impossible de lire son état
+        self.probation[token.mint] = Probe(token=token,
                                            until=token.created_at + self.s.trend.window_seconds)
-        if self.feed:
-            self.spawn(self.feed.subscribe_trades([token.mint]))
 
-    def _check_trend(self, probe: Probe, now: float | None = None) -> None:
+    async def _fetch_curves(self, addresses: list[str]) -> dict[str, Any]:
+        return await _safe(self.data.curves(addresses), 15) or {}
+
+    async def poll_trending(self, now: float | None = None) -> None:
+        """Lit les courbes des tokens en observation et promeut ceux qui décollent."""
         now = now or time.time()
-        mint = probe.token.mint
-        if probe.stats.creator_sold:  # le dev vend pendant l'observation : on oublie
-            self.probation.pop(mint, None)
-            self.spawn(self.release_mint(mint))
+        for mint, probe in list(self.probation.items()):
+            if now > probe.until:
+                del self.probation[mint]
+        if not self.probation:
             return
-        reason = trend_trigger(probe.stats, now, self.s.trend)
-        if not reason:
-            return
+        probes = list(self.probation.values())
+        curves = await self._fetch_curves([p.token.bonding_curve for p in probes])
         while self._trend_checks and now - self._trend_checks[0] > 3600:
             self._trend_checks.popleft()
-        if (len(self._trend_checks) >= self.s.trend.max_checks_per_hour
-                or len(self.candidates) >= self.s.max_watched_tokens):
-            return  # quota atteint : on réessaiera au prochain trade si le token décolle encore
-        self._trend_checks.append(now)
-        log.info("Tendance : %s ($%s) — %s", probe.token.name, probe.token.symbol, reason)
-        self._add_candidate(probe.token, MatchResult(self.trend_narrative, 1.0, [reason]), 3.0)
+        for probe in probes:
+            token = probe.token
+            curve = curves.get(token.bonding_curve)
+            if curve is None or token.mint not in self.probation:
+                continue
+            if curve.complete:  # déjà gradué : trop tard
+                self.probation.pop(token.mint, None)
+                continue
+            reason = curve_trigger(token, curve, now, self.s.trend)
+            if not reason:
+                continue
+            if (len(self._trend_checks) >= self.s.trend.max_checks_per_hour
+                    or len(self.candidates) >= self.s.max_watched_tokens):
+                continue  # quota atteint : on réessaiera au prochain passage
+            self._trend_checks.append(now)
+            log.info("Tendance : %s ($%s) — %s", token.name, token.symbol, reason)
+            self._add_candidate(token, MatchResult(self.trend_narrative, 1.0, [reason]),
+                                self.s.observe_seconds, curve=curve)
 
-    async def run_trending(self, every: float = 5.0) -> None:
-        """Arrête d'observer les tokens dont la période d'essai est finie."""
+    async def run_trending(self) -> None:
         while True:
-            now = time.time()
-            for mint, probe in list(self.probation.items()):
-                if now > probe.until:
-                    del self.probation[mint]
-                    await self.release_mint(mint)
-            await asyncio.sleep(every)
+            if self.trend_enabled:
+                try:
+                    await self.poll_trending()
+                except Exception:  # noqa: BLE001
+                    log.exception("Tendance : erreur de lecture des courbes")
+            await asyncio.sleep(self.s.trend.poll_seconds)
 
     def set_trend(self, enabled: bool) -> None:
         self.trend_enabled = enabled
         self.storage.kv_set("trend_enabled", enabled)
         if not enabled:
-            mints = list(self.probation)
             self.probation.clear()
-            for mint in mints:
-                self.spawn(self.release_mint(mint))
 
     def on_trade(self, trade: Trade) -> None:
         if self.trader:
             self.trader.on_trade(trade)
         self.journal.on_trade(trade)
-        probe = self.probation.get(trade.mint)
-        if probe:
-            probe.stats.apply(trade)
-            self._check_trend(probe)
-            return  # s'il devient candidat, il garde ces stats : ne pas compter le trade deux fois
         cand = self.candidates.get(trade.mint)
         if not cand:
             return
@@ -476,8 +487,8 @@ class Engine:
 
     async def release_mint(self, mint: str) -> None:
         """Se désabonne des trades d'un token si plus personne ne le suit."""
-        if (mint in self.candidates or mint in self.probation or self.journal.holds(mint)
-                or (self.trader and self.trader.holds(mint))):
+        # (le journal et la stratégie tendance lisent les courbes : pas besoin des trades)
+        if mint in self.candidates or (self.trader and self.trader.holds(mint)):
             return
         if self.feed:
             await self.feed.unsubscribe_trades([mint])
@@ -568,7 +579,7 @@ class Engine:
             return (f"🔥 <b>Stratégie tendance</b> : {state}\n"
                     f"Tokens en observation : {len(self.probation)} · analyses cette heure : "
                     f"{len(self._trend_checks)}/{t.max_checks_per_hour}\n"
-                    f"Déclenchement : ≥ {t.min_buyers} acheteurs, ≥ {t.min_buy_sol:g} SOL, courbe "
+                    f"Déclenchement : ≥ {t.min_buy_sol:g} SOL entrés (hors dev), courbe "
                     f"≥ {t.min_progress_pct:g}%, entre {t.min_age_seconds:g} et "
                     f"{t.window_seconds:g} s après le lancement\n"
                     f"Trading papier sur ces tokens : {'oui' if t.trade else 'non'}\n"

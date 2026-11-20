@@ -90,9 +90,8 @@ async def test_full_flow_alert_then_dev_sells(setup):
 
     await asyncio.sleep(1.0)  # fin du suivi (0.6 s)
     assert tok.mint not in engine.candidates
-    assert tok.mint in feed.subs  # le journal suit encore le prix pendant 30 min
+    assert tok.mint not in feed.subs  # le journal lit la courbe : plus besoin des trades
     await engine.journal.tick(time.time() + 1801)
-    assert tok.mint not in feed.subs
     row = engine.storage.candidate_rows()[0]
     assert row["decision"] == "alerte" and row["creator_sold_30"] == 1
     assert row["mcap_30"] == pytest.approx(mcap * 0.3)

@@ -47,6 +47,7 @@ class FakeData:
         self.rug_by_mint: dict[str, RugcheckInfo] = {}
         self.funding_by_creator: dict[str, FundingInfo] = {}
         self.coins_by_creator: dict[str, list[dict[str, Any]]] = {}
+        self.curves_by_address: dict[str, Any] = {}
         self.exited: set[tuple[str, str]] = set()
 
     async def metadata(self, uri: str) -> TokenMetadata | None:
@@ -58,6 +59,9 @@ class FakeData:
 
     async def rugcheck(self, mint: str) -> RugcheckInfo | None:
         return self.rug_by_mint.get(mint)
+
+    async def curves(self, addresses: list[str]) -> dict[str, Any]:
+        return {a: self.curves_by_address[a] for a in addresses if a in self.curves_by_address}
 
     async def creator_coins(self, creator: str) -> list[dict[str, Any]] | None:
         return self.coins_by_creator.get(creator)

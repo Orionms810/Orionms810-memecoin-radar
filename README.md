@@ -98,9 +98,10 @@ compte Telegram. C'est gratuit.
 ## 🔥 Stratégie « tendance » (sans news)
 
 En plus des narratifs, le bot observe **chaque nouveau token** pendant ses 3
-premières minutes. S'il attire vite beaucoup d'acheteurs différents (20+), de
-vrais montants (4+ SOL), plus d'achats que de ventes et une bonding curve qui
-avance (10 %+), il devient candidat et passe par **les mêmes contrôles anti-rug**.
+premières minutes en lisant sa **bonding curve** toutes les 15 s (une seule requête
+RPC pour 100 tokens). Si de vrais SOL entrent vite (4+ SOL hors achat du dev) et que
+la courbe avance (10 %+), il devient candidat : ses trades sont écoutés en direct
+pendant l'observation, puis il passe par **les mêmes contrôles anti-rug**.
 Les alertes portent un 🔥 et `/analyse` sépare les résultats 🎯 narratif / 🔥 tendance.
 
 - `/tendance` : état · `/tendance off` : coupée immédiatement · `/tendance on` : relancée

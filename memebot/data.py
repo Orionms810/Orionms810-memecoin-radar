@@ -14,6 +14,7 @@ from typing import Any
 
 import httpx
 
+from .curves import CurveState, decode_account_value
 from .funding import FundingInfo, FundingTracer
 from .models import DexInfo, HolderInfo, RugcheckInfo, TokenMetadata
 
@@ -145,6 +146,24 @@ class LiveData:
             creator_pct=creator_pct,
             accounts_checked=len(accounts),
         )
+
+    # ------------------------------------------------------ bonding curves
+    async def curves(self, addresses: list[str]) -> dict[str, CurveState]:
+        """État de plusieurs bonding curves (100 par requête RPC)."""
+        out: dict[str, CurveState] = {}
+        addrs = [a for a in dict.fromkeys(addresses) if a]
+        for i in range(0, len(addrs), 100):
+            chunk = addrs[i:i + 100]
+            res = await self._rpc("getMultipleAccounts",
+                                  [chunk, {"encoding": "base64", "commitment": "confirmed"}])
+            values = res.get("value") if isinstance(res, dict) else None
+            if not isinstance(values, list):
+                continue
+            for addr, value in zip(chunk, values):
+                state = decode_account_value(value)
+                if state:
+                    out[addr] = state
+        return out
 
     # ------------------------------------------------------ faux acheteurs
     async def funding(self, buyers: list[str], *, creator: str | None = None) -> FundingInfo | None:
