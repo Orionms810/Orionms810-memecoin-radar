@@ -71,8 +71,10 @@ HELP = """🤖 <b>Memecoin Radar</b> — commandes
 /trading — état · /trading on · /trading off
 /positions — positions ouvertes
 /vendre tout · /vendre $TICKER — vente immédiate
-/journal — derniers trades"""
-TRADING_COMMANDS = {"/trading", "/positions", "/vendre", "/journal"}
+/journal — derniers trades
+/sorties — ce que les tokens sont devenus après la vente (sort-il trop tôt ?)
+/export trades — fichier de tous les trades"""
+TRADING_COMMANDS = {"/trading", "/positions", "/vendre", "/journal", "/sorties"}
 CHANNEL_COMMANDS = {"/chaines", "/chaine", "/retirer"}
 
 
@@ -298,6 +300,13 @@ class Engine:
 
     async def _fetch_curves(self, addresses: list[str]) -> dict[str, Any]:
         return await _safe(self.data.curves(addresses), 15) or {}
+
+    async def dex_price_sol(self, mint: str) -> float | None:
+        """Prix en SOL par token sur DexScreener (tokens gradués, hors bonding curve)."""
+        info = await _safe(self.data.dexscreener(mint), 10)
+        if info and info.price_usd and self.sol_usd:
+            return info.price_usd / self.sol_usd
+        return None
 
     async def poll_curves(self, now: float | None = None) -> None:
         """Un passage : lit en une fois les courbes utiles au recensement et à la tendance."""
@@ -622,6 +631,13 @@ class Engine:
             name = time.strftime("recensement-%Y%m%d-%H%M.csv")
             ok = await self.notifier.send_document(
                 name, to_csv(rows), f"{len(rows)} tokens recensés sur {days:g} jour(s)")
+            return None if ok else "Envoi du fichier impossible (Telegram non configuré ?)."
+        if cmd == "/export" and arg.lower().split()[:1] == ["trades"]:
+            rows = self.storage.trade_rows()
+            if not rows:
+                return "Aucun trade clôturé pour l'instant."
+            ok = await self.notifier.send_document(time.strftime("trades-%Y%m%d-%H%M.csv"),
+                                                   to_csv(rows), f"{len(rows)} trades")
             return None if ok else "Envoi du fichier impossible (Telegram non configuré ?)."
         if cmd == "/export":
             rows = self.storage.candidate_rows(self.journal_since)

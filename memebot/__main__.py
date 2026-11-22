@@ -134,6 +134,8 @@ async def build_trader(settings: Settings, engine: Engine, http: httpx.AsyncClie
                                   latency=ts.paper_latency_seconds)
         log.info("Trading en mode PAPIER (argent virtuel) — capital %.4f SOL", trader.cash)
     trader.release = engine.release_mint
+    trader.fetch_curves = engine._fetch_curves  # trades manqués et graduation
+    trader.dex_price = engine.dex_price_sol  # prix après graduation
     engine.trader = trader
     return trader
 

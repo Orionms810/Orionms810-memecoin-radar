@@ -176,6 +176,19 @@ time_stop_minutes = 15      # vend si moins de +10 % après 15 min
 time_stop_min_gain_pct = 10
 stale_minutes = 5           # vend si plus aucun échange
 
+# Après x2 : la mise est récupérée, le reste (« moonbag ») peut courir
+take_profit2_pct = 400      # à x5... (0 = pas de 2e palier)
+take_profit2_fraction = 0.5 # ...vend la moitié de ce qui reste
+moonbag_trailing_pct = 45   # vend le reste si -45 % depuis le plus haut
+reversal_window_seconds = 60  # vend si, sur la dernière minute...
+reversal_sell_ratio = 2.0     # ...les ventes font 2x les achats...
+reversal_min_sell_sol = 1.0   # ...(au moins 1 SOL vendu)...
+reversal_drop_pct = 20        # ...et le prix est 20 % sous son plus haut (0 sur la fenêtre = désactivé)
+moonbag_stale_minutes = 60  # vend si plus aucun échange pendant 1 h
+moonbag_max_hours = 72      # durée maximale de garde (0 = illimitée)
+max_moonbags = 3            # moonbags qui ne bloquent pas les nouveaux achats
+after_watch_minutes = 120   # après chaque vente, suit encore le prix 2 h (/sorties)
+
 # Coupe-circuits
 daily_loss_limit_pct = 35   # plus d'achat aujourd'hui si -35 % depuis minuit (UTC)
 max_drawdown_pct = 60       # arrêt complet si -60 % depuis le plus haut (/trading on pour relancer)

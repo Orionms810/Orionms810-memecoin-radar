@@ -113,18 +113,29 @@ Les alertes portent un 🔥 et `/analyse` sépare les résultats 🎯 narratif /
 ## 🤖 Trading automatique
 
 Quand une alerte passe des filtres **plus stricts** (sécurité ≥ 60, momentum ≥ 30,
-market cap < 100 SOL, token de moins de 3 min), le bot achète, puis gère seul la
-sortie :
+market cap ≤ 50 SOL, token de moins de 90 s, dev < 5 %, top 10 < 30 %), le bot
+achète, puis gère seul la sortie, en deux temps.
+
+**Avant x2 : protection serrée.** Sur 2 jours de données, aucun des 179 tokens tombés
+à -25 % ou pire en 5 min n'est remonté au-dessus de son prix d'entrée dans les 30 min.
+
+**Après x2 : on laisse courir.** La moitié est vendue, donc la mise est récupérée.
+Le reste (le « moonbag ») peut aller loin : il ne vend que sur un vrai retournement.
 
 | Règle | Réglage par défaut |
 |---|---|
-| Taille de position | 35 % du capital disponible, une seule position à la fois |
+| Taille de position | 35 % du capital disponible, une seule position à la fois (les moonbags ne comptent pas) |
 | Réserve intouchable | 0,008 SOL pour les frais et le loyer du compte token |
 | Stop-loss | -25 % |
-| Prise de profit | vend 50 % à x2 (la mise est récupérée) |
-| Trailing stop | dès +40 %, vend tout si le prix recule de 30 % depuis son plus haut |
+| 1er palier | vend 50 % à x2 (la mise est récupérée) |
+| Trailing stop avant x2 | dès +40 %, vend tout si le prix recule de 30 % depuis son plus haut |
+| 2e palier | vend la moitié du reste à x5 |
+| Trailing du moonbag | vend le reste si le prix recule de 45 % depuis son plus haut |
+| Les vendeurs prennent le dessus | moonbag vendu si, sur la dernière minute, les ventes font au moins 2x les achats (≥ 1 SOL) et le prix est 20 % sous son plus haut |
+| Graduation | le token passe sur PumpSwap : la position continue, prix suivi sur DexScreener |
 | Le dev vend | vente immédiate |
-| Ça ne décolle pas | vente si moins de +10 % après 15 min, ou si plus aucun échange depuis 5 min |
+| Ça ne décolle pas | vente si moins de +10 % après 15 min, ou si plus aucun échange depuis 5 min (1 h pour un moonbag) |
+| Durée max d'un moonbag | 72 h |
 | Perte du jour | plus d'achat si -35 % depuis minuit (UTC) |
 | Pertes d'affilée | pause de 2 h après 3 pertes |
 | Coupe-circuit | arrêt complet à -60 % depuis le plus haut (`/trading on` pour relancer) |
@@ -288,6 +299,8 @@ avec `tmux`, `screen` ou un service `systemd`.
 | `/positions` | Positions ouvertes |
 | `/vendre tout` · `/vendre $TICKER` | Vente immédiate (bouton panique) |
 | `/journal` | Derniers trades et résultats |
+| `/sorties` | Ce que les tokens sont devenus **après** la vente (suivis 2 h) : le bot sort-il trop tôt ? |
+| `/export trades` | Fichier CSV de tous les trades |
 | `/chaine @nom [poids]` | Suivre une chaîne Telegram (tweets republiés) |
 | `/chaines` · `/retirer @nom` | Chaînes suivies / en retirer une |
 

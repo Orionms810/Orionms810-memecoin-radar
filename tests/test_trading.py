@@ -128,15 +128,20 @@ async def test_take_profit_then_trailing_stop(trader):
     assert "VENTE PARTIELLE" in trader.notifier.sent[-1][0]
 
     tick(trader, 120)  # x4
-    tick(trader, 80)  # -33 % depuis le plus haut -> trailing stop
+    tick(trader, 80)  # -33 % depuis le plus haut : un moonbag a le droit de respirer
+    await settle()
+    assert "MintPos" in trader.positions and not pos.tp2_done
+    tick(trader, 60)  # -50 % depuis le plus haut -> trailing large (45 %)
     await settle()
     assert "MintPos" not in trader.positions
     last = trader.notifier.sent[-1][0]
     assert "trailing stop" in last and "+" in last
-    expected_back = stake / 2 * 2 + stake / 2 * (80 / 30)
+    expected_back = stake / 2 * 2 + stake / 2 * (60 / 30)
     assert trader.cash == pytest.approx(0.05 - stake + expected_back)
     stats = trader.storage.trade_stats("paper")
     assert stats["count"] == 1 and stats["wins"] == 1
+    row = trader.storage.trade_rows("paper")[0]
+    assert row["exit_x"] == pytest.approx(2.0) and row["peak_x"] == pytest.approx(4.0)
 
 
 async def test_stop_loss_and_dev_sell(trader):

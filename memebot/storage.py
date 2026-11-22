@@ -59,10 +59,12 @@ class Storage:
 
     def _migrate(self) -> None:
         """Ajoute les colonnes apparues dans les nouvelles versions (bases existantes)."""
-        existing = {row[1] for row in self.db.execute("PRAGMA table_info(candidates)")}
-        for col, kind in self.ADDED_CANDIDATE_COLUMNS:
-            if col not in existing:
-                self.db.execute(f"ALTER TABLE candidates ADD COLUMN {col} {kind}")
+        for table, added in (("candidates", self.ADDED_CANDIDATE_COLUMNS),
+                             ("trades", self.ADDED_TRADE_COLUMNS)):
+            existing = {row[1] for row in self.db.execute(f"PRAGMA table_info({table})")}
+            for col, kind in added:
+                if col not in existing:
+                    self.db.execute(f"ALTER TABLE {table} ADD COLUMN {col} {kind}")
 
     def close(self) -> None:
         self.db.close()
@@ -211,13 +213,35 @@ class Storage:
         self.db.commit()
 
     # ---------------------------------------------------------------- trades
+    # Ajoutées pour le suivi des sorties : multiples par rapport au prix d'achat
+    ADDED_TRADE_COLUMNS = (("exit_x", "REAL"), ("peak_x", "REAL"), ("after_max_x", "REAL"),
+                           ("after_end_x", "REAL"), ("graduated", "INTEGER"))
+
     def add_trade(self, *, mode: str, mint: str, symbol: str, name: str, opened_at: float,
-                  entry_sol: float, exit_sol: float, pnl_sol: float, reason: str) -> None:
-        self.db.execute(
-            "INSERT INTO trades(mode,mint,symbol,name,opened_at,closed_at,entry_sol,exit_sol,"
-            "pnl_sol,reason) VALUES (?,?,?,?,?,?,?,?,?,?)",
-            (mode, mint, symbol, name, opened_at, time.time(), entry_sol, exit_sol, pnl_sol, reason))
+                  entry_sol: float, exit_sol: float, pnl_sol: float, reason: str,
+                  **extra: Any) -> int:
+        values = {"mode": mode, "mint": mint, "symbol": symbol, "name": name,
+                  "opened_at": opened_at, "closed_at": time.time(), "entry_sol": entry_sol,
+                  "exit_sol": exit_sol, "pnl_sol": pnl_sol, "reason": reason}
+        values.update({k: v for k, v in extra.items() if k in dict(self.ADDED_TRADE_COLUMNS)})
+        cur = self.db.execute(
+            f"INSERT INTO trades({','.join(values)}) VALUES ({','.join('?' * len(values))})",
+            list(values.values()))
         self.db.commit()
+        return int(cur.lastrowid or 0)
+
+    def update_trade(self, trade_id: int, values: dict[str, Any]) -> None:
+        cols = [c for c in values if c in dict(self.ADDED_TRADE_COLUMNS)]
+        if not cols:
+            return
+        self.db.execute(f"UPDATE trades SET {', '.join(c + '=?' for c in cols)} WHERE id=?",
+                        [values[c] for c in cols] + [trade_id])
+        self.db.commit()
+
+    def trade_rows(self, mode: str | None = None) -> list[sqlite3.Row]:
+        if mode is None:
+            return self.db.execute("SELECT * FROM trades ORDER BY id").fetchall()
+        return self.db.execute("SELECT * FROM trades WHERE mode=? ORDER BY id", (mode,)).fetchall()
 
     def recent_trades(self, mode: str, limit: int = 10) -> list[sqlite3.Row]:
         return self.db.execute("SELECT * FROM trades WHERE mode=? ORDER BY id DESC LIMIT ?",

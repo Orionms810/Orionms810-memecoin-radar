@@ -1,17 +1,26 @@
-"""Le trader automatique : entre sur les meilleures alertes, gère les sorties
-(stop-loss, prise de profit, trailing stop, sortie si le dev vend) et applique
-les coupe-circuits de risque."""
+"""Le trader automatique : entre sur les meilleures alertes, gère les sorties et
+applique les coupe-circuits de risque.
+
+Sorties en deux temps :
+- avant x2 : protection serrée (stop-loss, trailing, sortie si ça ne décolle pas) ;
+- à x2 : la moitié est vendue, la mise est récupérée. Le reste (« moonbag ») peut
+  courir : 2e palier à x5, trailing large, et sortie quand les vendeurs prennent
+  le dessus. Si le token gradue, son prix est suivi sur DexScreener.
+Après chaque vente, le prix est encore suivi 2 h (/sorties) pour vérifier avec des
+chiffres si le bot sort trop tôt."""
 
 from __future__ import annotations
 
 import asyncio
 import logging
 import time
+from collections import deque
 from dataclasses import asdict, dataclass
 from html import escape
 from typing import Any, Awaitable, Callable
 
-from ..models import PUMP_TOTAL_SUPPLY, NewToken, Trade, TradeStats
+from ..models import (PUMP_INITIAL_REAL_TOKENS, PUMP_INITIAL_VIRTUAL_TOKENS, PUMP_TOTAL_SUPPLY,
+                      NewToken, Trade, TradeStats)
 from ..report import TokenReport, fmt_usd, links
 from ..storage import Storage
 from ..telegram import Notifier
@@ -39,6 +48,9 @@ class Position:
     closing: bool = False
     sell_failures: int = 0
     alert_msg_id: int | None = None
+    bonding_curve: str = ""
+    graduated: bool = False  # bonding curve terminée : le token se trade sur PumpSwap
+    tp2_done: bool = False
 
     @property
     def value(self) -> float:
@@ -58,6 +70,26 @@ class Position:
         return d
 
 
+@dataclass
+class AfterWatch:
+    """Suivi du prix d'un token après sa vente (le bot est-il sorti trop tôt ?)."""
+    trade_id: int
+    mint: str
+    symbol: str
+    bonding_curve: str
+    entry_price: float
+    exit_price: float
+    closed_at: float
+    max_price: float
+    last_price: float
+    graduated: bool = False
+
+
+def _x(pct: float) -> str:
+    """+100 % -> « x2 »."""
+    return f"x{1 + pct / 100:g}"
+
+
 class Trader:
     def __init__(self, ts: TradingSettings, executor: Any, storage: Storage, notifier: Notifier,
                  *, feed: Any = None, sol_usd: Callable[[], float | None] = lambda: None):
@@ -75,6 +107,13 @@ class Trader:
         self.tasks: set[asyncio.Task] = set()
         self._warned: set[str] = set()
         self._live_balance: float | None = None
+        # Lecture des courbes (trades manqués, graduation) et prix DexScreener après graduation
+        self.fetch_curves: Callable[[list[str]], Awaitable[dict[str, Any]]] | None = None
+        self.dex_price: Callable[[str], Awaitable[float | None]] | None = None
+        self.own_wallet = str(getattr(executor, "pubkey", "") or "")  # nos ventes ≠ pression vendeuse
+        self.flows: dict[str, deque[tuple[float, bool, float]]] = {}
+        self.after: dict[int, AfterWatch] = {}
+        self._last_curve_check = self._last_dex_check = self._last_after_check = 0.0
 
         self.enabled = bool(storage.kv_get(self._k("enabled"), True))
         self.cash = float(storage.kv_get("paper_cash", ts.paper_start_sol))
@@ -83,6 +122,9 @@ class Trader:
             pos = Position(**d)
             self.positions[pos.mint] = pos
             self.prices[pos.mint] = pos.last_price
+        for d in storage.kv_get(self._k("after"), []) or []:
+            w = AfterWatch(**d)
+            self.after[w.trade_id] = w
 
     # ------------------------------------------------------------ utilitaires
     def _k(self, name: str) -> str:
@@ -92,6 +134,7 @@ class Trader:
         self.storage.kv_set(self._k("positions"), [p.to_dict() for p in self.positions.values()])
         self.storage.kv_set(self._k("guard"), self.guard.state.to_dict())
         self.storage.kv_set(self._k("enabled"), self.enabled)
+        self.storage.kv_set(self._k("after"), [asdict(w) for w in self.after.values()])
         if self.mode == "paper":
             self.storage.kv_set("paper_cash", self.cash)
 
@@ -129,6 +172,12 @@ class Trader:
 
     def equity_from(self, cash: float) -> float:
         return cash + sum(p.value for p in self.positions.values())
+
+    def _slots_used(self) -> int:
+        """Positions qui comptent dans la limite : les moonbags (mise déjà récupérée)
+        ne bloquent pas les nouveaux achats, dans la limite de max_moonbags."""
+        bags = sum(1 for p in self.positions.values() if p.tp_done)
+        return len(self.positions) - bags + max(0, bags - self.ts.max_moonbags)
 
     async def _notify(self, text: str, reply_to: int | None = None) -> None:
         await self.notifier.send(text, reply_to=reply_to, force=True)
@@ -191,7 +240,7 @@ class Trader:
             halted = self.guard.update_equity(equity)
             if halted:
                 await self._notify(f"🛑 <b>Trading arrêté</b> : {escape(halted)}")
-            ok, why = self.guard.can_open(equity, len(self.positions) + len(self.pending) - 1)
+            ok, why = self.guard.can_open(equity, self._slots_used() + len(self.pending) - 1)
             if not ok:
                 log.info("Trader : pas d'achat de $%s (%s)", token.symbol, why)
                 return why
@@ -220,15 +269,14 @@ class Trader:
         pos = Position(mint=mint, name=token.name, symbol=token.symbol, creator=token.creator,
                        entry_sol=fill.sol, tokens=fill.tokens, entry_price=fill.price,
                        opened_at=now, peak_price=price_now, last_price=price_now,
-                       last_trade_at=now, alert_msg_id=alert_msg_id)
+                       last_trade_at=now, alert_msg_id=alert_msg_id,
+                       bonding_curve=token.bonding_curve)
         self.positions[mint] = pos
         self._save()
-        ts = self.ts
         await self._notify(
             f"🟢 <b>ACHAT</b> {self.tag} — <b>${escape(token.symbol)}</b>\n"
             f"Mise : {fill.sol:.4f} SOL{self._usd(fill.sol)} · market cap {mcap:.0f} SOL\n"
-            f"Plan : stop-loss -{ts.stop_loss_pct:.0f}% · vente de {ts.take_profit_fraction:.0%} à "
-            f"+{ts.take_profit_pct:.0f}% · trailing {ts.trailing_stop_pct:.0f}% · sortie si le dev vend\n"
+            f"Plan : {self.plan_text()}\n"
             + (f'<a href="https://solscan.io/tx/{fill.signature}">transaction</a>\n'
                if self.mode == "live" else "")
             + links(mint),
@@ -237,19 +285,81 @@ class Trader:
         return None
 
     # ----------------------------------------------------------------- sorties
+    def plan_text(self) -> str:
+        ts = self.ts
+        parts = [f"stop-loss -{ts.stop_loss_pct:.0f}%",
+                 f"à {_x(ts.take_profit_pct)} vente de {ts.take_profit_fraction:.0%} (mise récupérée)"]
+        if ts.take_profit2_pct > 0:
+            parts.append(f"à {_x(ts.take_profit2_pct)} vente de {ts.take_profit2_fraction:.0%} du reste")
+        parts.append(f"le reste court (trailing {ts.moonbag_trailing_pct:.0f}%"
+                     + (", sortie si les vendeurs prennent le dessus" if ts.reversal_window_seconds > 0
+                        else "") + ")")
+        parts.append("sortie immédiate si le dev vend")
+        return " · ".join(parts)
+
+    def _set_price(self, pos: Position, price: float, now: float) -> None:
+        self.prices[pos.mint] = price
+        pos.last_price = price
+        pos.peak_price = max(pos.peak_price, price)
+        pos.last_trade_at = now
+
     def on_trade(self, trade: Trade) -> None:
         pos = self.positions.get(trade.mint)
         if trade.market_cap_sol > 0 and (pos or trade.mint in self.pending):
             self.prices[trade.mint] = trade.market_cap_sol / PUMP_TOTAL_SUPPLY
         if not pos:
             return
-        pos.last_price = self.prices[trade.mint]
-        pos.peak_price = max(pos.peak_price, pos.last_price)
-        pos.last_trade_at = time.time()
+        now = time.time()
+        if not self.own_wallet or trade.trader != self.own_wallet:  # nos propres ventes ne comptent pas
+            flow = self.flows.setdefault(pos.mint, deque())
+            flow.append((now, trade.is_buy, trade.sol_amount))
+            while flow and now - flow[0][0] > 300:
+                flow.popleft()
+        if trade.mint in self.prices:
+            self._set_price(pos, self.prices[trade.mint], now)
+        if trade.v_tokens is not None and \
+                PUMP_INITIAL_VIRTUAL_TOKENS - trade.v_tokens >= PUMP_INITIAL_REAL_TOKENS * 0.999:
+            self._mark_graduated(pos)
         if not trade.is_buy and trade.trader == pos.creator:
             self._exit_soon(pos, 1.0, "le dev vend")
         else:
             self._check_exits(pos)
+
+    def _mark_graduated(self, pos: Position) -> None:
+        if pos.graduated:
+            return
+        pos.graduated = True
+        self._save()
+        self.spawn(self._notify(
+            f"🎓 <b>${escape(pos.symbol)} a gradué</b> (bonding curve terminée, {pos.gain_pct:+.0f}%) : "
+            "il se trade maintenant sur PumpSwap. Je suis son prix sur DexScreener et la position "
+            "continue.", reply_to=pos.alert_msg_id))
+
+    def sell_pressure(self, pos: Position, now: float | None = None) -> tuple[float, float]:
+        """SOL achetés et vendus par les autres sur la fenêtre récente."""
+        now = now or time.time()
+        buys = sells = 0.0
+        for t, is_buy, sol in self.flows.get(pos.mint, ()):
+            if now - t <= self.ts.reversal_window_seconds:
+                if is_buy:
+                    buys += sol
+                else:
+                    sells += sol
+        return buys, sells
+
+    def _reversal(self, pos: Position, now: float) -> str | None:
+        ts = self.ts
+        if ts.reversal_window_seconds <= 0 or pos.graduated:
+            return None
+        drop = (1 - pos.last_price / pos.peak_price) * 100 if pos.peak_price else 0.0
+        if drop < ts.reversal_drop_pct:
+            return None
+        buys, sells = self.sell_pressure(pos, now)
+        if sells >= ts.reversal_min_sell_sol and sells >= ts.reversal_sell_ratio * buys:
+            return (f"les vendeurs prennent le dessus : {sells:.1f} SOL vendus contre {buys:.1f} "
+                    f"achetés en {ts.reversal_window_seconds:.0f} s, -{drop:.0f}% depuis le plus haut "
+                    f"({pos.gain_pct:+.0f}%)")
+        return None
 
     def exit_reason(self, pos: Position, now: float | None = None) -> tuple[float, str] | None:
         now = now or time.time()
@@ -258,12 +368,24 @@ class Trader:
             return 1.0, f"stop-loss ({g:+.0f}%)"
         if not pos.tp_done and g >= ts.take_profit_pct:
             return ts.take_profit_fraction, f"prise de profit ({g:+.0f}%)"
+        if pos.tp_done and not pos.tp2_done and ts.take_profit2_pct > 0 and g >= ts.take_profit2_pct:
+            return ts.take_profit2_fraction, f"2e prise de profit ({g:+.0f}%)"
+        trail = ts.moonbag_trailing_pct if pos.tp_done else ts.trailing_stop_pct
         if (pos.tp_done or pos.peak_gain_pct >= ts.trailing_arm_pct) and \
-                pos.last_price <= pos.peak_price * (1 - ts.trailing_stop_pct / 100):
+                pos.last_price <= pos.peak_price * (1 - trail / 100):
             return 1.0, f"trailing stop (plus haut {pos.peak_gain_pct:+.0f}%, maintenant {g:+.0f}%)"
+        if pos.tp_done:  # moonbag : la mise est déjà récupérée, on laisse courir
+            why = self._reversal(pos, now)
+            if why:
+                return 1.0, why
+            if ts.moonbag_max_hours > 0 and now - pos.opened_at > ts.moonbag_max_hours * 3600:
+                return 1.0, f"durée maximale de garde ({ts.moonbag_max_hours:.0f} h, {g:+.0f}%)"
+            if not pos.graduated and now - pos.last_trade_at > ts.moonbag_stale_minutes * 60:
+                return 1.0, f"plus aucun échange depuis {ts.moonbag_stale_minutes:.0f} min"
+            return None
         if now - pos.opened_at > ts.time_stop_minutes * 60 and g < ts.time_stop_min_gain_pct:
             return 1.0, f"pas de décollage en {ts.time_stop_minutes:.0f} min ({g:+.0f}%)"
-        if now - pos.last_trade_at > ts.stale_minutes * 60:
+        if not pos.graduated and now - pos.last_trade_at > ts.stale_minutes * 60:
             return 1.0, f"plus aucun échange depuis {ts.stale_minutes:.0f} min"
         return None
 
@@ -306,11 +428,19 @@ class Trader:
             if full or pos.tokens <= 0:
                 await self._close(pos, reason, fill.signature)
             else:
+                first = not pos.tp_done
+                pos.tp2_done = pos.tp2_done or not first
                 pos.tp_done = True
                 self._save()
+                ts = self.ts
+                recovered = pos.realized_sol / pos.entry_sol * 100 if pos.entry_sol else 0
+                nxt = (f"prochain palier à {_x(ts.take_profit2_pct)}, "
+                       if first and ts.take_profit2_pct > 0 else "")
                 await self._notify(
                     f"💰 <b>VENTE PARTIELLE</b> {self.tag} — ${escape(pos.symbol)} — {escape(reason)}\n"
-                    f"Reçu : {fill.sol:.4f} SOL{self._usd(fill.sol)} · le reste suit un trailing stop",
+                    f"Reçu : {fill.sol:.4f} SOL{self._usd(fill.sol)} · déjà encaissé {recovered:.0f}% de "
+                    f"la mise\nLe reste court : {nxt}trailing {ts.moonbag_trailing_pct:.0f}% depuis le "
+                    "plus haut, sortie si les vendeurs prennent le dessus ou si le dev vend",
                     reply_to=pos.alert_msg_id)
         finally:
             pos.closing = False
@@ -321,11 +451,21 @@ class Trader:
 
     async def _close(self, pos: Position, reason: str, signature: str = "") -> None:
         self.positions.pop(pos.mint, None)
+        self.flows.pop(pos.mint, None)
         pnl = pos.realized_sol - pos.entry_sol
         pct = pnl / pos.entry_sol * 100 if pos.entry_sol else 0.0
-        self.storage.add_trade(mode=self.mode, mint=pos.mint, symbol=pos.symbol, name=pos.name,
-                               opened_at=pos.opened_at, entry_sol=pos.entry_sol,
-                               exit_sol=pos.realized_sol, pnl_sol=pnl, reason=reason)
+        entry = pos.entry_price or 1.0
+        trade_id = self.storage.add_trade(
+            mode=self.mode, mint=pos.mint, symbol=pos.symbol, name=pos.name,
+            opened_at=pos.opened_at, entry_sol=pos.entry_sol, exit_sol=pos.realized_sol,
+            pnl_sol=pnl, reason=reason, exit_x=round(pos.last_price / entry, 4),
+            peak_x=round(pos.peak_price / entry, 4), graduated=int(pos.graduated))
+        if self.ts.after_watch_minutes > 0 and trade_id:
+            self.after[trade_id] = AfterWatch(
+                trade_id=trade_id, mint=pos.mint, symbol=pos.symbol,
+                bonding_curve=pos.bonding_curve, entry_price=entry, exit_price=pos.last_price,
+                closed_at=time.time(), max_price=pos.last_price, last_price=pos.last_price,
+                graduated=pos.graduated)
         cooldown = self.guard.record_close(pnl)
         cash = await self._safe_cash()
         if cash is not None:
@@ -358,15 +498,85 @@ class Trader:
             log.warning("Solde indisponible : %s", e)
             return None
 
+    # ------------------------------------------------------- prix hors trades
+    async def refresh_prices(self, now: float | None = None) -> None:
+        """Relit la courbe des positions sans trade récent (trades manqués, graduation)
+        et le prix DexScreener des positions graduées."""
+        now = now or time.time()
+        ts = self.ts
+        if self.fetch_curves and now - self._last_curve_check >= ts.curve_check_seconds:
+            silent = [p for p in self.positions.values() if p.bonding_curve and not p.graduated
+                      and now - p.last_trade_at >= ts.curve_check_seconds]
+            if silent:
+                self._last_curve_check = now
+                curves = await self.fetch_curves([p.bonding_curve for p in silent]) or {}
+                for p in silent:
+                    c = curves.get(p.bonding_curve)
+                    if c is None or p.mint not in self.positions:
+                        continue
+                    if c.complete:
+                        self._mark_graduated(p)
+                        continue
+                    price = c.market_cap_sol / PUMP_TOTAL_SUPPLY
+                    if price > 0 and (p.last_price <= 0 or abs(price / p.last_price - 1) > 1e-4):
+                        self._set_price(p, price, now)  # des trades nous ont échappé
+        if self.dex_price and now - self._last_dex_check >= ts.curve_check_seconds:
+            graduated = [p for p in self.positions.values() if p.graduated]
+            if graduated:
+                self._last_dex_check = now
+                for p in graduated:
+                    price = await self.dex_price(p.mint)
+                    if price and price > 0 and p.mint in self.positions and \
+                            (p.last_price <= 0 or abs(price / p.last_price - 1) > 1e-4):
+                        self._set_price(p, price, now)
+
+    async def watch_after(self, now: float | None = None) -> None:
+        """Suit le prix des tokens vendus pendant after_watch_minutes."""
+        if not self.after:
+            return
+        now = now or time.time()
+        on_curve = [w for w in self.after.values() if w.bonding_curve and not w.graduated]
+        curves: dict[str, Any] = {}
+        if on_curve and self.fetch_curves:
+            curves = await self.fetch_curves([w.bonding_curve for w in on_curve]) or {}
+        for key, w in list(self.after.items()):
+            price = None
+            c = None if w.graduated else curves.get(w.bonding_curve)
+            if c is not None:
+                price = c.market_cap_sol / PUMP_TOTAL_SUPPLY
+                w.graduated = bool(c.complete)
+            elif w.graduated and self.dex_price:
+                price = await self.dex_price(w.mint)
+            if price and price > 0:
+                w.last_price = price
+                w.max_price = max(w.max_price, price)
+            if now - w.closed_at >= self.ts.after_watch_minutes * 60:
+                self.storage.update_trade(w.trade_id, {
+                    "after_max_x": round(w.max_price / w.entry_price, 4),
+                    "after_end_x": round(w.last_price / w.entry_price, 4),
+                    "graduated": int(w.graduated)})
+                del self.after[key]
+        self.storage.kv_set(self._k("after"), [asdict(w) for w in self.after.values()])
+
     # ------------------------------------------------------------------ boucle
     async def run(self, every: float = 5.0) -> None:
         if self.feed and self.positions:
             await self.feed.subscribe_trades(list(self.positions))
         last_equity_check = 0.0
         while True:
+            now = time.time()
+            try:
+                await self.refresh_prices(now)
+            except Exception:  # noqa: BLE001 - une lecture ratée ne doit pas tout arrêter
+                log.exception("Trader : lecture des prix impossible")
             for pos in list(self.positions.values()):
                 self._check_exits(pos)
-            now = time.time()
+            if now - self._last_after_check >= 60:
+                self._last_after_check = now
+                try:
+                    await self.watch_after(now)
+                except Exception:  # noqa: BLE001
+                    log.exception("Trader : suivi après vente impossible")
             if now - last_equity_check > 60:
                 last_equity_check = now
                 halted = None
@@ -394,7 +604,9 @@ class Trader:
             lines.append(f"🛑 Arrêté : {escape(st.halt_reason)}")
         elif st.cooldown_until > time.time():
             lines.append(f"⏸ Pause encore {(st.cooldown_until - time.time()) / 60:.0f} min")
-        lines.append(f"Positions ouvertes : {len(self.positions)}")
+        bags = sum(1 for p in self.positions.values() if p.tp_done)
+        lines.append(f"Positions ouvertes : {len(self.positions)}"
+                     + (f" (dont {bags} moonbag(s), mise déjà récupérée)" if bags else ""))
         if stats["count"]:
             lines.append(f"Trades : {stats['count']} · gagnants {stats['wins']}/{stats['count']} · "
                          f"résultat total {stats['pnl']:+.4f} SOL{self._usd(abs(stats['pnl']))}")
@@ -404,11 +616,59 @@ class Trader:
         if not self.positions:
             return "Aucune position ouverte."
         lines = ["📂 <b>Positions</b>"]
+        now = time.time()
         for p in self.positions.values():
-            age = (time.time() - p.opened_at) / 60
+            age = (now - p.opened_at) / 60
+            stage = ("🌙 moonbag : mise récupérée, le reste court" if p.tp_done
+                     else f"avant {_x(self.ts.take_profit_pct)} : protection serrée")
+            if p.graduated:
+                stage += " · 🎓 gradué (prix DexScreener)"
+            elif self.flows.get(p.mint):
+                buys, sells = self.sell_pressure(p, now)
+                stage += f" · dernière minute : {buys:.1f} SOL achetés / {sells:.1f} vendus"
             lines.append(f"<b>${escape(p.symbol)}</b> {p.gain_pct:+.0f}% (plus haut {p.peak_gain_pct:+.0f}%) · "
-                         f"mise {p.entry_sol:.4f} SOL · valeur {p.value:.4f} SOL · {age:.0f} min\n"
-                         f"<code>{p.mint}</code>")
+                         f"mise {p.entry_sol:.4f} SOL · encaissé {p.realized_sol:.4f} · valeur "
+                         f"{p.value:.4f} SOL · {age:.0f} min\n{stage}\n<code>{p.mint}</code>")
+        return "\n".join(lines)
+
+    def exits_text(self) -> str:
+        """Ce que les tokens sont devenus après la vente : le bot sort-il trop tôt ?"""
+        hours = self.ts.after_watch_minutes / 60
+        rows = [r for r in self.storage.trade_rows(self.mode) if r["exit_x"] is not None]
+        if not rows:
+            return ("Aucune vente suivie pour l'instant. Après chaque vente, je surveille le token "
+                    f"encore {hours:g} h pour voir s'il fallait garder plus longtemps.")
+        lines = [f"🔎 <b>Et après la vente ?</b> (prix suivi {hours:g} h après chaque sortie)",
+                 "<i>x1 = ton prix d'achat · x3 = trois fois ton prix d'achat</i>"]
+        early = good = followed = 0
+        for r in rows:
+            if r["after_max_x"] is None:
+                continue
+            followed += 1
+            if r["after_max_x"] >= 2 * r["exit_x"]:
+                early += 1
+            elif r["after_end_x"] <= 0.7 * r["exit_x"]:
+                good += 1
+        for r in rows[-10:][::-1]:
+            pct = r["pnl_sol"] / r["entry_sol"] * 100 if r["entry_sol"] else 0
+            line = (f"{'✅' if r['pnl_sol'] >= 0 else '🔴'} <b>${escape(r['symbol'])}</b> {pct:+.0f}% — "
+                    f"vendu à x{r['exit_x']:.2f} (plus haut pendant la position x{r['peak_x']:.2f})\n"
+                    f"   {escape(r['reason'])}")
+            if r["after_max_x"] is None:
+                line += "\n   après : suivi en cours…"
+            else:
+                verdict = ("⚠️ sorti trop tôt" if r["after_max_x"] >= 2 * r["exit_x"] else
+                           "👍 bien sorti" if r["after_end_x"] <= 0.7 * r["exit_x"] else "≈ pareil")
+                line += (f"\n   après : plus haut x{r['after_max_x']:.2f}, x{r['after_end_x']:.2f} "
+                         f"au bout de {hours:g} h{' 🎓' if r['graduated'] else ''} — {verdict}")
+            lines.append(line)
+        if followed:
+            lines.append("")
+            lines.append(f"<b>Bilan sur {followed} vente(s) suivie(s)</b> : {early} trop tôt (le token a "
+                         f"ensuite doublé par rapport au prix de vente) · {good} bien sortie(s) (il valait "
+                         f"30 % de moins ou pire {hours:g} h après) · {followed - early - good} sans grande "
+                         "différence.")
+            lines.append("<i>Il faut une vingtaine de ventes pour conclure.</i>")
         return "\n".join(lines)
 
     def journal_text(self) -> str:
@@ -442,6 +702,8 @@ class Trader:
             return self.positions_text()
         if cmd == "/journal":
             return self.journal_text()
+        if cmd == "/sorties":
+            return self.exits_text()
         if cmd == "/vendre":
             targets = (list(self.positions.values()) if arg.lower() in ("tout", "all")
                        else [p for p in self.positions.values() if p.mint == arg or

@@ -27,7 +27,8 @@ class TradingSettings:
     max_dev_buy_pct: float = 5.0  # dev ≥ 5 % : 59 % des tokens finissaient à moins de x0,5
     max_top10_pct: float = 30.0  # top 10 ≥ 30 % : 68 % des tokens finissaient à moins de x0,5
 
-    # Sorties
+    # Sorties AVANT x2 : protection serrée. Sur 2 jours de données, aucun des 179 tokens
+    # tombés à -25 % ou pire en 5 min n'est remonté au-dessus du prix d'entrée en 30 min.
     stop_loss_pct: float = 25.0
     take_profit_pct: float = 100.0  # à +100 % (x2)...
     take_profit_fraction: float = 0.5  # ...on vend la moitié (on récupère sa mise)
@@ -36,6 +37,24 @@ class TradingSettings:
     time_stop_minutes: float = 15.0  # sortie si le trade ne décolle pas...
     time_stop_min_gain_pct: float = 10.0  # ...(moins de +10 % après 15 min)
     stale_minutes: float = 5.0  # sortie si plus aucun échange sur le token
+
+    # Sorties APRÈS x2 (« moonbag ») : la mise est récupérée, le reste peut courir
+    take_profit2_pct: float = 400.0  # à +400 % (x5)... (0 = pas de 2e palier)
+    take_profit2_fraction: float = 0.5  # ...on revend la moitié de ce qui reste
+    moonbag_trailing_pct: float = 45.0  # trailing large : les vrais runs reculent souvent de 30-40 %
+    # Sortie si les vendeurs prennent le dessus : sur la dernière minute, ventes ≥ 2x les
+    # achats (et ≥ 1 SOL), alors que le prix est déjà 20 % sous son plus haut
+    reversal_window_seconds: float = 60.0  # 0 = désactivé
+    reversal_sell_ratio: float = 2.0
+    reversal_min_sell_sol: float = 1.0
+    reversal_drop_pct: float = 20.0
+    moonbag_stale_minutes: float = 60.0  # vend si plus aucun échange pendant 1 h
+    moonbag_max_hours: float = 72.0  # durée maximale de garde (0 = illimitée)
+    max_moonbags: int = 3  # moonbags qui ne bloquent pas les nouveaux achats
+
+    # Suivi après la vente : le prix est encore relevé 2 h pour vérifier si on sort trop tôt
+    after_watch_minutes: float = 120.0
+    curve_check_seconds: float = 20.0  # relecture de la courbe si aucun trade reçu depuis 20 s
 
     # Coupe-circuits
     daily_loss_limit_pct: float = 35.0  # stop pour la journée si -35 % depuis minuit (UTC)
