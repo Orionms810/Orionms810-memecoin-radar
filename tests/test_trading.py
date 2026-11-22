@@ -13,7 +13,7 @@ from solders.pubkey import Pubkey
 from solders.signature import Signature
 from solders.transaction import VersionedTransaction
 
-from memebot.models import PUMP_TOTAL_SUPPLY, NewToken, RiskReport, Trade, TradeStats
+from memebot.models import PUMP_TOTAL_SUPPLY, HolderInfo, NewToken, RiskReport, Trade, TradeStats
 from memebot.report import TokenReport
 from memebot.storage import Storage
 from memebot.trading.executor import LiveExecutor, PaperExecutor, load_keypair
@@ -104,6 +104,12 @@ async def test_rejections(trader):
     assert "trop tard" in await trader.on_signal(tok, rep, stats)
     tok.created_at = time.time() - 3600
     assert "trop vieux" in await trader.on_signal(tok, rep, None)
+    tok, rep = report()
+    tok.initial_buy = 60_000_000  # le dev détient 6 %
+    assert "le dev détient 6.0%" in await trader.on_signal(tok, rep, None)
+    tok, rep = report()
+    rep.holders = HolderInfo(35, 8, "w", 1, 20)
+    assert "top 10 holders 35%" in await trader.on_signal(tok, rep, None)
     assert trader.positions == {}
 
 

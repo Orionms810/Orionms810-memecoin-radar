@@ -31,7 +31,7 @@ class TrendSettings:
     poll_seconds: float = 15.0  # lecture groupée des courbes (1 requête RPC pour 100 tokens)
     max_checks_per_hour: int = 6  # analyses complètes max par heure (économise le RPC)
     max_probes: int = 100  # tokens observés en même temps
-    trade: bool = True  # le trader (papier) peut acheter ces tokens
+    trade: bool = False  # le trader (papier) achète-t-il ces tokens ? Non : ils perdaient le plus
 
 
 @dataclass

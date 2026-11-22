@@ -62,7 +62,7 @@ def pump(engine, tok, n=25, sol=0.3):
     for i in range(n):
         engine.on_trade(Trade(mint=tok.mint, trader=f"{tok.symbol}-b{i}", is_buy=True,
                               sol_amount=sol, token_amount=1e6, new_balance=1e6,
-                              market_cap_sol=45 + i))
+                              market_cap_sol=30 + i * 0.5))  # reste sous 50 SOL
 
 
 async def test_token_taking_off_becomes_trend_alert(setup):
@@ -155,12 +155,11 @@ async def test_trader_buys_trend_tokens_only_if_allowed(setup):
 
 async def test_trend_buying_toggle_is_remembered(setup):
     engine, notifier, feed, data = setup
-    assert engine.s.trend.trade is True
-    reply = await engine.handle_command("/tendance achats off")
-    assert "observation seule" in reply and engine.s.trend.trade is False
-    assert engine.trend_enabled  # la tendance continue d'observer
+    assert engine.s.trend.trade is False  # par défaut : la tendance observe sans acheter
+    reply = await engine.handle_command("/tendance achats on")
+    assert "Achats papier sur ces tokens : oui" in reply and engine.s.trend.trade is True
+    engine.s.trend.trade = False  # même si la config dit non...
     again = Engine(engine.s, engine.storage, RecordingNotifier(), data, RecordingFeed())
-    again.s.trend.trade = True  # même si la config dit oui...
-    again2 = Engine(again.s, engine.storage, RecordingNotifier(), data, RecordingFeed())
-    assert again2.s.trend.trade is False  # ...le choix fait sur Telegram est gardé
-    assert "Achats papier sur ces tokens : oui" in await engine.handle_command("/tendance achats on")
+    assert again.s.trend.trade is True  # ...le choix fait sur Telegram est gardé
+    assert "observation seule" in await engine.handle_command("/tendance achats off")
+    assert engine.trend_enabled  # couper les achats ne coupe pas l'observation

@@ -154,6 +154,11 @@ class Trader:
             return f"market cap {mcap:.0f} SOL > {ts.max_entry_mcap_sol:.0f} (trop tard)"
         if now - token.created_at > ts.max_entry_age_seconds:
             return "token trop vieux pour une entrée rapide"
+        if token.dev_buy_pct >= ts.max_dev_buy_pct:
+            return f"le dev détient {token.dev_buy_pct:.1f}% (≥ {ts.max_dev_buy_pct:g}%)"
+        holders = getattr(report, "holders", None)
+        if holders is not None and holders.top10_pct >= ts.max_top10_pct:
+            return f"top 10 holders {holders.top10_pct:.0f}% (≥ {ts.max_top10_pct:g}%)"
         return None
 
     async def on_signal(self, token: NewToken, report: TokenReport, stats: TradeStats | None,

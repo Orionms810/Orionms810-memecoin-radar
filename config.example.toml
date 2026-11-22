@@ -132,7 +132,7 @@ min_progress_pct = 10       # avancement de la bonding curve
 poll_seconds = 15           # lecture des courbes toutes les 15 s (1 requête pour 100 tokens)
 max_checks_per_hour = 6     # analyses complètes max par heure (économise ta clé Helius)
 max_probes = 100            # tokens observés en même temps
-trade = true                # le trader (papier) peut acheter ces tokens
+trade = false               # le trader n'achète pas ces tokens (/tendance achats on pour tester)
 
 [trading]
 # "off"   = pas de trading automatique
@@ -151,8 +151,10 @@ max_open_positions = 1
 # Filtres d'entrée (plus stricts que les alertes)
 min_safety = 60
 min_momentum = 30
-max_entry_mcap_sol = 100    # n'achète pas un token déjà trop monté
-max_entry_age_seconds = 180
+max_entry_mcap_sol = 50     # n'achète pas un token déjà trop monté
+max_entry_age_seconds = 90
+max_dev_buy_pct = 5         # refuse si le dev détient 5 % ou plus
+max_top10_pct = 30          # refuse si le top 10 des holders détient 30 % ou plus
 
 # Sorties
 stop_loss_pct = 25

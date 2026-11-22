@@ -170,7 +170,7 @@ async def run_demo() -> None:
     buys(engine, snipe, 9, 0.8, snipe.market_cap_sol, 1.2)
     # Le vrai engouement arrive sur NUGGET, un peu plus tard
     await asyncio.sleep(2.2)
-    mcap_good = buys(engine, good, 25, 0.6, good.market_cap_sol, 0.9)
+    mcap_good = buys(engine, good, 25, 0.6, good.market_cap_sol, 0.6)
     buys(engine, rug, 3, 0.2, rug.market_cap_sol, 0.2)
 
     await asyncio.sleep(settings.observe_seconds + 1.5)

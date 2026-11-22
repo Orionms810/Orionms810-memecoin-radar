@@ -21,8 +21,11 @@ class TradingSettings:
     # Filtres d'entrée (plus stricts que les alertes)
     min_safety: int = 60
     min_momentum: int = 30
-    max_entry_mcap_sol: float = 100.0  # au-delà, on arrive trop tard
-    max_entry_age_seconds: float = 180.0
+    # Réglés sur 2 jours de données (631 tokens) : au-delà, la plupart s'effondraient
+    max_entry_mcap_sol: float = 50.0  # au-delà, on arrive trop tard
+    max_entry_age_seconds: float = 90.0
+    max_dev_buy_pct: float = 5.0  # dev ≥ 5 % : 59 % des tokens finissaient à moins de x0,5
+    max_top10_pct: float = 30.0  # top 10 ≥ 30 % : 68 % des tokens finissaient à moins de x0,5
 
     # Sorties
     stop_loss_pct: float = 25.0
