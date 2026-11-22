@@ -144,6 +144,21 @@ max_checks_per_hour = 6     # analyses complètes max par heure (économise ta c
 max_probes = 100            # tokens observés en même temps
 trade = false               # le trader n'achète pas ces tokens (/tendance achats on pour tester)
 
+[snipe]
+# Achat IMMÉDIAT (sans observation) quand :
+#  - un compte de confiance poste l'adresse d'un token (/confiance @chaine) ;
+#  - un créateur suivi lance un token (/createur <wallet> nom) ;
+#  - tu envoies /snipe <adresse>.
+enabled = true
+trade = true                # false = message d'alerte seulement, pas d'achat
+max_mcap_sol = 2000         # pas d'achat au-delà (~300 000 $) : trop tard
+extra_slots = 1             # un snipe peut s'ajouter à une position déjà ouverte
+# Créateurs dont un ancien token a gradué : leurs nouveaux tokens sont analysés
+# comme une alerte (observation + contrôles anti-rug), visibles dans /analyse...
+proven_creators = true
+proven_trade = false        # ...mais pas achetés tant que les chiffres ne montrent pas que ça marche
+proven_max_per_hour = 10    # analyses par heure au maximum (économise les crédits Helius)
+
 [trading]
 # "off"   = pas de trading automatique
 # "paper" = argent VIRTUEL (par défaut) : teste au moins 2 semaines avant de passer en réel

@@ -44,15 +44,15 @@ class RiskGuard:
             return st.halt_reason
         return None
 
-    def can_open(self, equity: float, open_positions: int,
-                 now: float | None = None) -> tuple[bool, str]:
+    def can_open(self, equity: float, open_positions: int, now: float | None = None, *,
+                 extra_slots: int = 0, ignore_cooldown: bool = False) -> tuple[bool, str]:
         now = now or time.time()
         st, ts = self.state, self.ts
         if st.halted:
             return False, f"trading arrêté : {st.halt_reason} (/trading on pour relancer)"
-        if open_positions >= ts.max_open_positions:
+        if open_positions >= ts.max_open_positions + extra_slots:
             return False, "nombre maximum de positions ouvertes atteint"
-        if now < st.cooldown_until:
+        if now < st.cooldown_until and not ignore_cooldown:
             mins = (st.cooldown_until - now) / 60
             return False, f"pause après {ts.max_consecutive_losses} pertes d'affilée ({mins:.0f} min restantes)"
         if (st.day_start_equity > 0

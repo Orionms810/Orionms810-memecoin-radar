@@ -133,13 +133,18 @@ def _risk_lines(risk: RiskReport) -> list[str]:
 def format_alert(r: TokenReport, *, observe_seconds: float) -> str:
     t, s = r.token, r.stats
     emoji, verdict = r.risk.verdict
-    trend = bool(r.match and r.match.narrative.id == "TENDANCE")
-    title = "🔥 <b>TOKEN TENDANCE</b> (sans news)" if trend else "🎯 <b>TOKEN LIÉ À UN NARRATIF</b>"
+    nid = r.match.narrative.id if r.match else ""
+    creator = nid == "CREATEUR"
+    trend = nid == "TENDANCE" or creator  # pas de vrai narratif derrière
+    title = ("🏆 <b>CRÉATEUR QUI A DÉJÀ RÉUSSI</b>" if creator else
+             "🔥 <b>TOKEN TENDANCE</b> (sans news)" if trend else "🎯 <b>TOKEN LIÉ À UN NARRATIF</b>")
     lines = [f"{title} — {emoji} <b>{verdict}</b> (sécurité {r.risk.safety}/100)", ""]
     lines.append(f"<b>{escape(t.name)}</b> (${escape(t.symbol)})")
     lines.append(f"<code>{t.mint}</code>")
     lines.append("")
-    if trend and r.match:
+    if creator and r.match:
+        lines.append(f"🏆 Ce créateur a déjà réussi : {escape(', '.join(r.match.keywords))}")
+    elif trend and r.match:
         lines.append(f"📈 Décolle tout seul : {escape(', '.join(r.match.keywords))}")
     elif r.match:
         n = r.match.narrative

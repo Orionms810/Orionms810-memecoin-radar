@@ -204,15 +204,15 @@ def format_analysis(rows: list[Any]) -> str:
     lines = [f"📊 <b>Analyse des candidats</b> — {len(done)} suivis 30 min "
              f"({pending} en cours)",
              "<i>« x1.00 » = prix inchangé 30 min après la décision, « x0.50 » = -50 %.</i>", ""]
-    def is_trend(r: Any) -> bool:
-        return r["narrative"] == "TENDANCE"
+    def kind(r: Any) -> str:
+        return {"TENDANCE": "🔥 tendance", "CREATEUR": "🏆 créateur"}.get(r["narrative"], "🎯 narratif")
 
+    kinds = ("🎯 narratif", "🔥 tendance", "🏆 créateur")
     for decision, label in LABELS.items():
         rows_d = [r for r in done if r["decision"] == decision]
         if decision == ALERT:
-            for name, sub in (("Alertés 🎯 narratif", [r for r in rows_d if not is_trend(r)]),
-                              ("Alertés 🔥 tendance", [r for r in rows_d if is_trend(r)])):
-                line = _group_line(name, sub)
+            for k in kinds:
+                line = _group_line(f"Alertés {k}", [r for r in rows_d if kind(r) == k])
                 if line:
                     lines.append(line)
             continue
@@ -220,8 +220,7 @@ def format_analysis(rows: list[Any]) -> str:
         if line:
             lines.append(line)
     traded = [r for r in done if r["traded"]]
-    for name, sub in (("Achetés 🎯 narratif", [r for r in traded if not is_trend(r)]),
-                      ("Achetés 🔥 tendance", [r for r in traded if is_trend(r)])):
+    for name, sub in ((f"Achetés {k}", [r for r in traded if kind(r) == k]) for k in kinds):
         line = _group_line(name, sub)
         if line:
             lines.append(line)

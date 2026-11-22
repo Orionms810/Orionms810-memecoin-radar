@@ -51,6 +51,7 @@ class Position:
     bonding_curve: str = ""
     graduated: bool = False  # bonding curve terminée : le token se trade sur PumpSwap
     tp2_done: bool = False
+    source: str = ""  # pourquoi on a acheté (alerte, CA posté par..., créateur suivi...)
 
     @property
     def value(self) -> float:
@@ -223,6 +224,29 @@ class Trader:
             log.info("Trader : pas d'achat de $%s (%s)", token.symbol, why)
             return why
         mcap = stats.last_mcap if stats and stats.last_mcap else token.market_cap_sol
+        return await self._buy(token, mcap, alert_msg_id)
+
+    async def snipe(self, token: NewToken, mcap: float, reason: str, alert_msg_id: int | None = None,
+                    *, graduated: bool = False, max_mcap_sol: float = 2000.0,
+                    extra_slots: int = 1) -> str | None:
+        """Achat immédiat (CA posté par un compte de confiance, créateur suivi) : pas
+        d'observation ni de filtres d'alerte, la vitesse passe avant. Les coupe-circuits
+        restent actifs, sauf la pause après des pertes d'affilée."""
+        if not self.enabled:
+            return "trading désactivé"
+        if self.holds(token.mint):
+            return "déjà en position"
+        if mcap <= 0:
+            return "prix inconnu"
+        if mcap > max_mcap_sol:
+            return f"market cap {mcap:.0f} SOL > {max_mcap_sol:.0f} (trop tard)"
+        return await self._buy(token, mcap, alert_msg_id, source=reason, graduated=graduated,
+                               extra_slots=extra_slots, ignore_cooldown=True)
+
+    async def _buy(self, token: NewToken, mcap: float, alert_msg_id: int | None, *,
+                   source: str = "", graduated: bool = False, extra_slots: int = 0,
+                   ignore_cooldown: bool = False) -> str | None:
+        mint = token.mint
         self.prices[mint] = mcap / PUMP_TOTAL_SUPPLY
 
         self.pending.add(mint)  # réserve la place avant toute attente
@@ -240,7 +264,8 @@ class Trader:
             halted = self.guard.update_equity(equity)
             if halted:
                 await self._notify(f"🛑 <b>Trading arrêté</b> : {escape(halted)}")
-            ok, why = self.guard.can_open(equity, self._slots_used() + len(self.pending) - 1)
+            ok, why = self.guard.can_open(equity, self._slots_used() + len(self.pending) - 1,
+                                          extra_slots=extra_slots, ignore_cooldown=ignore_cooldown)
             if not ok:
                 log.info("Trader : pas d'achat de $%s (%s)", token.symbol, why)
                 return why
@@ -250,7 +275,7 @@ class Trader:
                     f"⚠️ Capital trop faible ({cash:.4f} SOL) pour couvrir une position, "
                     "la réserve de frais et le loyer du compte token. Je ne trade plus."))
                 return "capital trop faible"
-            if self.feed:
+            if self.feed and not graduated:
                 await self.feed.subscribe_trades([mint])
             fill = await self.ex.buy(mint, size)
         finally:
@@ -270,12 +295,13 @@ class Trader:
                        entry_sol=fill.sol, tokens=fill.tokens, entry_price=fill.price,
                        opened_at=now, peak_price=price_now, last_price=price_now,
                        last_trade_at=now, alert_msg_id=alert_msg_id,
-                       bonding_curve=token.bonding_curve)
+                       bonding_curve=token.bonding_curve, graduated=graduated, source=source)
         self.positions[mint] = pos
         self._save()
         await self._notify(
             f"🟢 <b>ACHAT</b> {self.tag} — <b>${escape(token.symbol)}</b>\n"
-            f"Mise : {fill.sol:.4f} SOL{self._usd(fill.sol)} · market cap {mcap:.0f} SOL\n"
+            + (f"⚡ {escape(source)}\n" if source else "")
+            + f"Mise : {fill.sol:.4f} SOL{self._usd(fill.sol)} · market cap {mcap:.0f} SOL\n"
             f"Plan : {self.plan_text()}\n"
             + (f'<a href="https://solscan.io/tx/{fill.signature}">transaction</a>\n'
                if self.mode == "live" else "")
@@ -459,7 +485,8 @@ class Trader:
             mode=self.mode, mint=pos.mint, symbol=pos.symbol, name=pos.name,
             opened_at=pos.opened_at, entry_sol=pos.entry_sol, exit_sol=pos.realized_sol,
             pnl_sol=pnl, reason=reason, exit_x=round(pos.last_price / entry, 4),
-            peak_x=round(pos.peak_price / entry, 4), graduated=int(pos.graduated))
+            peak_x=round(pos.peak_price / entry, 4), graduated=int(pos.graduated),
+            source=pos.source)
         if self.ts.after_watch_minutes > 0 and trade_id:
             self.after[trade_id] = AfterWatch(
                 trade_id=trade_id, mint=pos.mint, symbol=pos.symbol,
@@ -678,8 +705,10 @@ class Trader:
         lines = [f"📒 <b>Derniers trades</b> ({self.tag})"]
         for r in rows:
             pct = r["pnl_sol"] / r["entry_sol"] * 100 if r["entry_sol"] else 0
+            src = r["source"] if "source" in r.keys() and r["source"] else ""
             lines.append(f"{'✅' if r['pnl_sol'] >= 0 else '🔴'} ${escape(r['symbol'])} "
-                         f"{r['pnl_sol']:+.4f} SOL ({pct:+.0f}%) — {escape(r['reason'])}")
+                         f"{r['pnl_sol']:+.4f} SOL ({pct:+.0f}%) — {escape(r['reason'])}"
+                         + (f" · ⚡ {escape(src)}" if src else ""))
         return "\n".join(lines)
 
     async def handle_command(self, cmd: str, arg: str) -> str | None:

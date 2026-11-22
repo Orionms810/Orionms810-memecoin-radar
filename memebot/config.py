@@ -12,6 +12,7 @@ from dotenv import load_dotenv
 
 from .risk import RiskThresholds
 from .trading.settings import TradingSettings
+from .vip import SnipeSettings
 from .census import CensusSettings
 from .trending import TrendSettings
 
@@ -79,6 +80,7 @@ class Settings:
     trading: TradingSettings = field(default_factory=TradingSettings)
     trend: TrendSettings = field(default_factory=TrendSettings)
     census: CensusSettings = field(default_factory=CensusSettings)
+    snipe: SnipeSettings = field(default_factory=SnipeSettings)
     wallet_secret: str | None = None  # clé privée du wallet dédié (mode réel uniquement)
     pumpportal_api_key: str | None = None  # optionnel et payant : trades via PumpPortal
     solana_ws_url: str | None = None  # websocket RPC (sinon déduit de SOLANA_RPC_URL)
@@ -160,6 +162,9 @@ def load_settings(config_path: str | Path = "config.toml", env_path: str | Path 
         for key, value in (raw.get("trading") or {}).items():
             if hasattr(s.trading, key) and value is not None:
                 setattr(s.trading, key, value)
+        for key, value in (raw.get("snipe") or {}).items():
+            if hasattr(s.snipe, key) and value is not None:
+                setattr(s.snipe, key, value)
         s.trading.mode = str(s.trading.mode).lower()
 
     s.telegram_token = os.getenv("TELEGRAM_BOT_TOKEN") or None

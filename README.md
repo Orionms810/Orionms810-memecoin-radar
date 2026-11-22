@@ -110,6 +110,33 @@ Les alertes portent un 🔥 et `/analyse` sépare les résultats 🎯 narratif /
 
 ---
 
+## ⚡ Snipes : acheter avant tout le monde
+
+Les plus gros multiples arrivent quand **une personne connue lance ou poste son
+token**. Dans ce cas, le bot achète tout de suite, sans les 20 s d'observation
+habituelles.
+
+| Déclencheur | Comment l'activer |
+|---|---|
+| Un compte de confiance poste l'adresse (CA) d'un token pump.fun | `/confiance @chaine` (une chaîne Telegram qui republie les posts d'**une** personne) |
+| Un créateur suivi lance un nouveau token | `/createur <wallet> nom` (le bot voit la création sur la blockchain en 1-2 s) |
+| Tu as vu passer un token | `/snipe <adresse>` |
+| Un créateur dont un ancien token a gradué relance | automatique : analysé comme une alerte (🏆), **pas acheté** tant que `/analyse` ne montre pas que ça marche |
+
+**Les pièges à connaître :**
+- **Les faux.** N'importe qui peut créer un token « Elon » avec le lien de son
+  compte X. Seule l'adresse postée par le **vrai** compte compte. Ne mets en
+  confiance que des chaînes qui republient les posts d'une seule personne, jamais
+  une chaîne de « calls » ou de news.
+- **Les initiés.** Sur les tokens de célébrités ou d'influenceurs, l'équipe achète
+  souvent dans le même bloc que la création, puis revend sur les acheteurs. Le
+  système de sorties (moitié vendue à x2) sert à encaisser avant ça.
+- **La vitesse.** Les chaînes Telegram gratuites republient avec quelques secondes
+  à une minute de retard. Les bots payants sont plus rapides : on arrive tôt, pas
+  forcément premier.
+- **Hors pump.fun.** Certains gros lancements se font ailleurs (Meteora...) : le
+  bot envoie l'adresse et les liens, mais n'achète pas automatiquement.
+
 ## 🤖 Trading automatique
 
 Quand une alerte passe des filtres **plus stricts** (sécurité ≥ 60, momentum ≥ 30,
@@ -299,6 +326,9 @@ avec `tmux`, `screen` ou un service `systemd`.
 | `/positions` | Positions ouvertes |
 | `/vendre tout` · `/vendre $TICKER` | Vente immédiate (bouton panique) |
 | `/journal` | Derniers trades et résultats |
+| `/confiance @chaine` · `/confiance` · `/confiance retirer @chaine` | Comptes de confiance : achat immédiat s'ils postent une adresse |
+| `/createur <wallet> nom` · `/createurs` · `/createur retirer <wallet>` | Créateurs suivis : achat immédiat à chaque nouveau token |
+| `/snipe <adresse>` | Acheter un token tout de suite |
 | `/sorties` | Ce que les tokens sont devenus **après** la vente (suivis 2 h) : le bot sort-il trop tôt ? |
 | `/export trades` | Fichier CSV de tous les trades |
 | `/chaine @nom [poids]` | Suivre une chaîne Telegram (tweets republiés) |

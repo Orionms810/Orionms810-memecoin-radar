@@ -39,12 +39,15 @@ from .report import (
     format_paper_stats,
     format_rug_warning,
     fmt_age,
+    fmt_mcap,
+    links,
 )
 from .risk import assess_risk, momentum_score
 from .storage import Storage
 from .telegram import Notifier
 from .text import extract_keywords, manual_keywords
 from .trending import TREND_ID, Probe, curve_trigger
+from .vip import CREATOR_ID, bonding_curve_address, extract_mints, is_pubkey
 
 if TYPE_CHECKING:  # l'IA est optionnelle (module anthropic)
     from .ai import AIAnalyst
@@ -72,6 +75,12 @@ HELP = """🤖 <b>Memecoin Radar</b> — commandes
 /positions — positions ouvertes
 /vendre tout · /vendre $TICKER — vente immédiate
 /journal — derniers trades
+<b>Snipes</b> (achat immédiat, sans observation)
+/confiance @chaine — si cette chaîne poste l'adresse d'un token : achat immédiat
+/confiance — liste · /confiance retirer @chaine
+/createur &lt;wallet&gt; [nom] — quand ce wallet lance un token : achat immédiat
+/createurs — liste · /createur retirer &lt;wallet&gt;
+/snipe &lt;adresse&gt; — acheter un token tout de suite
 /sorties — ce que les tokens sont devenus après la vente (sort-il trop tôt ?)
 /export trades — fichier de tous les trades"""
 TRADING_COMMANDS = {"/trading", "/positions", "/vendre", "/journal", "/sorties"}
@@ -166,6 +175,17 @@ class Engine:
             settings.trend.trade = bool(saved_trade)
         self.probation: dict[str, Probe] = {}
         self._trend_checks: deque[float] = deque()
+        # Créateurs qui ont déjà fait graduer un token : un autre pseudo-narratif
+        self.creator_narrative = Narrative(
+            id=CREATOR_ID, keywords={}, created_at=time.time(), expires_at=float("inf"),
+            event=NewsEvent(source="creator", source_name="🏆 Créateur qui a déjà réussi",
+                            event_id="creator", text="Un ancien token de ce créateur a gradué",
+                            weight=0.5, announce=False))
+        # Snipes : comptes de confiance (chaînes) et wallets de créateurs suivis
+        self.trusted: set[str] = set(storage.kv_get("trusted_accounts", []) or [])
+        self.watched_creators: dict[str, str] = dict(storage.kv_get("watched_creators", {}) or {})
+        self._sniped: dict[str, None] = {}
+        self._proven_checks: deque[float] = deque()
 
     # ------------------------------------------------------------- utilitaires
     def spawn(self, coro: Awaitable[Any]) -> asyncio.Task:
@@ -184,6 +204,9 @@ class Engine:
         if self.storage.event_seen(ev.event_id):
             return None
         self.storage.add_event(ev.event_id, ev.source, ev.source_name, ev.text, ev.url)
+        if self.s.snipe.enabled and ev.source != "manual" and self.account_of(ev) in self.trusted:
+            for mint in extract_mints(ev.text)[:3]:  # le CA posté par le vrai compte
+                self.spawn(self.snipe_mint(mint, f"CA posté par {ev.source_name}"))
         if ev.source == "manual":
             kws = manual_keywords(ev.text)
         else:
@@ -242,6 +265,20 @@ class Engine:
         self.baseline.add(token.name, token.symbol)
         self.recent.append(token)
         self._try_match(token, self.book.live())
+        if self.s.snipe.enabled and token.creator in self.watched_creators:
+            name = self.watched_creators[token.creator]
+            self.spawn(self.fire_snipe(token, token.market_cap_sol,
+                                       f"nouveau token de {name} (créateur suivi)"))
+        elif self.s.snipe.proven_creators and token.creator and token.mint not in self.candidates \
+                and len(self.candidates) < self.s.max_watched_tokens:
+            grads = self.storage.creator_graduations(token.creator, token.mint)
+            now = time.time()
+            while self._proven_checks and now - self._proven_checks[0] > 3600:
+                self._proven_checks.popleft()
+            if grads and len(self._proven_checks) < self.s.snipe.proven_max_per_hour:
+                self._proven_checks.append(now)
+                m = MatchResult(self.creator_narrative, 1.0, [f"{grads} ancien(s) token(s) gradué(s)"])
+                self._add_candidate(token, m, self.s.observe_seconds)
         if self.trend_enabled and token.mint not in self.candidates:
             self._start_probe(token)
         if self.s.census.enabled:
@@ -463,7 +500,7 @@ class Engine:
                 t for lvl, t in risk.flags if lvl in ("danger", "critical"))
         elif report.momentum < self.s.min_momentum:
             decision, detail = REJECT_MOMENTUM, f"momentum {report.momentum}/100 (personne n'achète)"
-        elif narr is not self.trend_narrative and narr.alerts_sent >= self.s.max_alerts_per_narrative:
+        elif not self._pseudo(narr) and narr.alerts_sent >= self.s.max_alerts_per_narrative:
             decision, detail = REJECT_LIMIT, f"déjà {narr.alerts_sent} alertes sur {narr.id}"
         row_id = self.journal.record(
             token=token, report=report, stats=cand.stats, decision=decision, detail=detail,
@@ -474,7 +511,7 @@ class Engine:
             return
         narr.alerts_sent += 1
         self.alerts_sent += 1
-        if narr is not self.trend_narrative:
+        if not self._pseudo(narr):
             report.copies, report.rank = self._copies_rank(cand)
         observed = time.time() - cand.started_at
         msg_id = await self.notifier.send(format_alert(report, observe_seconds=observed))
@@ -486,12 +523,135 @@ class Engine:
             mint=token.mint, name=token.name, symbol=token.symbol, narrative=narr.id,
             match_score=cand.match.score, safety=risk.safety, momentum=report.momentum,
             verdict=risk.verdict[1], entry_mcap_sol=cand.alert_mcap)
-        if self.trader and (narr is not self.trend_narrative or self.s.trend.trade):
+        trade_ok = (self.s.trend.trade if narr is self.trend_narrative else
+                    self.s.snipe.proven_trade if narr is self.creator_narrative else True)
+        if self.trader and trade_ok:
             self.spawn(self._trade_and_log(token, report, cand.stats, msg_id, row_id))
         if self.ai and self.s.ai_review_alerts:
             self.spawn(self._ai_review(report, msg_id))
         self._check_watch(cand)  # le dev a peut-être déjà vendu pendant l'envoi
         self.spawn(self._watch_then_close(cand))
+
+    def _pseudo(self, narr: Narrative) -> bool:
+        """Tendance et créateurs : pas de vrai narratif derrière."""
+        return narr is self.trend_narrative or narr is self.creator_narrative
+
+    # ------------------------------------------------------------------ snipes
+    @staticmethod
+    def account_of(ev: NewsEvent) -> str:
+        """Compte qui a posté : la chaîne Telegram (d'après le lien) ou le compte X."""
+        m = re.search(r"t\.me/([A-Za-z0-9_]+)/", ev.url or "")
+        return (m.group(1) if m else ev.source_name.lstrip("@")).lower()
+
+    async def snipe_mint(self, mint: str, reason: str) -> None:
+        """Adresse postée : on vérifie que c'est un token pump.fun puis on achète."""
+        if mint in self._sniped:
+            return
+        token = self.storage.get_token(mint)
+        bc = token.bonding_curve if token and token.bonding_curve else bonding_curve_address(mint)
+        curve = (await self._fetch_curves([bc])).get(bc)
+        if curve is None:
+            if mint in self._sniped:
+                return
+            self._sniped[mint] = None
+            await self.notifier.send(
+                f"⚡ <b>Adresse détectée</b> — {escape(reason)}\n<code>{mint}</code>\n"
+                "Ce n'est pas un token pump.fun (ou le RPC n'a pas répondu) : pas d'achat "
+                "automatique. Regarde-le à la main :\n" + links(mint), force=True)
+            return
+        if token is None:
+            coin = await _safe(self.data.pump_coin(mint), 5) or {}
+            created = coin.get("created_timestamp")
+            token = NewToken(
+                mint=mint, name=str(coin.get("name") or "?"), symbol=str(coin.get("symbol") or "?"),
+                creator=str(coin.get("creator") or ""), uri=str(coin.get("metadata_uri") or ""),
+                created_at=float(created) / 1000 if isinstance(created, (int, float)) else time.time())
+        token.bonding_curve = bc
+        mcap = curve.market_cap_sol
+        if curve.complete:  # déjà sur PumpSwap : prix DexScreener
+            dex = await _safe(self.data.dexscreener(mint), 8)
+            mcap = dex.market_cap_usd / self.sol_usd if dex and dex.market_cap_usd and self.sol_usd else 0.0
+            if dex and token.symbol == "?":
+                token.name, token.symbol = dex.name or "?", dex.symbol or "?"
+        token.market_cap_sol = mcap
+        await self.fire_snipe(token, mcap, reason, graduated=curve.complete)
+
+    async def fire_snipe(self, token: NewToken, mcap: float, reason: str, *,
+                         graduated: bool = False) -> None:
+        if token.mint in self._sniped:
+            return
+        self._sniped[token.mint] = None
+        if len(self._sniped) > 5000:
+            self._sniped.pop(next(iter(self._sniped)))
+        ss = self.s.snipe
+        msg_id = await self.notifier.send("\n".join([
+            f"⚡ <b>SNIPE</b> — {escape(reason)}", "",
+            f"<b>{escape(token.name)}</b> (${escape(token.symbol)})",
+            f"<code>{token.mint}</code>",
+            f"💰 Market cap : {fmt_mcap(mcap, self.sol_usd) if mcap else '?'}"
+            + (" · 🎓 déjà gradué" if graduated else ""),
+            "⚠️ Achat immédiat, sans observation ni contrôle anti-rug : la vitesse d'abord. "
+            f"Contrôle quand même avec /check {token.mint}",
+            "", links(token.mint)]), force=True)
+        if not (self.trader and ss.trade):
+            return
+        why = await self.trader.snipe(token, mcap, reason, msg_id, graduated=graduated,
+                                      max_mcap_sol=ss.max_mcap_sol, extra_slots=ss.extra_slots)
+        if why:
+            await self.notifier.send(f"Pas d'achat de ${escape(token.symbol)} : {escape(why)}",
+                                     reply_to=msg_id, force=True)
+
+    def _trusted_command(self, arg: str) -> str:
+        words = arg.split()
+        if not words:
+            if not self.trusted:
+                return ("Aucun compte de confiance. Ajoute une chaîne qui republie les posts d'UNE "
+                        "personne : /confiance @nom_de_la_chaine")
+            return "🤝 <b>Comptes de confiance</b> (achat immédiat si ils postent une adresse)\n" + \
+                "\n".join(f"@{escape(h)}" for h in sorted(self.trusted))
+        remove = words[0].lower() in ("retirer", "supprimer", "remove", "off")
+        raw = words[1] if remove and len(words) > 1 else words[0]
+        h = re.sub(r"^(https?://)?(www\.)?(t|telegram|x|twitter)\.(me|com)/", "", raw.strip(), flags=re.I)
+        h = h.lstrip("@").split("/")[0].lower()
+        if not re.fullmatch(r"[a-z0-9_]{3,40}", h):
+            return "Usage : /confiance @nom_de_la_chaine · /confiance retirer @nom"
+        if remove:
+            self.trusted.discard(h)
+            self.storage.kv_set("trusted_accounts", sorted(self.trusted))
+            return f"@{escape(h)} n'est plus un compte de confiance."
+        self.trusted.add(h)
+        self.storage.kv_set("trusted_accounts", sorted(self.trusted))
+        lines = [f"✅ @{escape(h)} est un compte de confiance : s'il poste l'adresse d'un token "
+                 "pump.fun, j'achète tout de suite.",
+                 "⚠️ Mets en confiance UNIQUEMENT des chaînes qui republient les posts d'une seule "
+                 "personne (son compte officiel). Une chaîne de news ou de « calls » qui poste "
+                 "n'importe quelle adresse = achats de scams."]
+        channels = getattr(self.tg_channels, "channels", None)
+        if channels is not None and h not in channels:
+            lines.append(f"Je ne suis pas encore cette chaîne : ajoute-la aussi avec /chaine @{escape(h)}")
+        return "\n".join(lines)
+
+    def _creators_command(self, cmd: str, arg: str) -> str:
+        words = arg.split()
+        if cmd == "/createurs" or not words:
+            if not self.watched_creators:
+                return ("Aucun créateur suivi. Ajoute le wallet d'un créateur : "
+                        "/createur &lt;wallet&gt; nom")
+            return "👤 <b>Créateurs suivis</b> (achat immédiat à chaque nouveau token)\n" + "\n".join(
+                f"{escape(n)} — <code>{w}</code>" for w, n in self.watched_creators.items())
+        if words[0].lower() in ("retirer", "supprimer", "remove") and len(words) > 1:
+            name = self.watched_creators.pop(words[1], None)
+            self.storage.kv_set("watched_creators", self.watched_creators)
+            return f"{escape(name)} n'est plus suivi." if name else "Wallet introuvable (voir /createurs)."
+        wallet = words[0]
+        if not is_pubkey(wallet):
+            return "Usage : /createur &lt;adresse du wallet&gt; nom · /createur retirer &lt;wallet&gt;"
+        name = " ".join(words[1:])[:40] or wallet[:6]
+        self.watched_creators[wallet] = name
+        self.storage.kv_set("watched_creators", self.watched_creators)
+        return (f"✅ Créateur suivi : <b>{escape(name)}</b>. Dès que ce wallet lance un token sur "
+                "pump.fun, j'achète tout de suite.\nAstuce : le wallet d'un créateur est sur la page "
+                "pump.fun de ses tokens (« created by ») ou sur Solscan.")
 
     async def _trade_and_log(self, token: NewToken, report: TokenReport, stats: TradeStats,
                              msg_id: int | None, row_id: int) -> None:
@@ -649,6 +809,17 @@ class Engine:
             return None if ok else "Envoi du fichier impossible (Telegram non configuré ?)."
         if cmd == "/bilan":
             return format_paper_stats(self.storage.paper_stats())
+        if cmd == "/snipe":
+            mints = extract_mints(arg)
+            if not mints:
+                return "Usage : /snipe &lt;adresse du token&gt; — achat immédiat"
+            self._sniped.pop(mints[0], None)  # un /snipe manuel peut retenter
+            await self.snipe_mint(mints[0], "envoyé par toi (/snipe)")
+            return None
+        if cmd == "/confiance":
+            return self._trusted_command(arg)
+        if cmd in ("/createur", "/createurs"):
+            return self._creators_command(cmd, arg)
         if cmd in CHANNEL_COMMANDS:
             if not self.tg_channels:
                 return ("Chaînes Telegram non configurées : ajoute TG_API_ID et TG_API_HASH dans "
@@ -677,6 +848,9 @@ class Engine:
                     f"{len(self.census.tracked)} en cours\n"
                     f"Tendance : {'on' if self.trend_enabled else 'off'} "
                     f"({len(self.probation)} en observation)\n"
+                    f"Snipes : {len(self.trusted)} compte(s) de confiance · "
+                    f"{len(self.watched_creators)} créateur(s) suivi(s) · achat "
+                    f"{'immédiat' if self.s.snipe.trade else 'non (alerte seule)'}\n"
                     f"IA : {'oui' if self.ai else 'non'} · SOL : {sol} · "
                     f"alertes {'en pause' if self.notifier.muted else 'actives'}")
         return "Commande inconnue. Tape /aide."

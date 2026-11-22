@@ -35,6 +35,7 @@ CREATE TABLE IF NOT EXISTS census(
     creator_prev INTEGER, points INTEGER, path TEXT, mcap_5m REAL, mcap_15m REAL,
     mcap_30m REAL, max_mcap REAL, graduated INTEGER);
 CREATE INDEX IF NOT EXISTS idx_census_created ON census(created_at);
+CREATE INDEX IF NOT EXISTS idx_census_creator ON census(creator);
 CREATE TABLE IF NOT EXISTS candidates(
     id INTEGER PRIMARY KEY AUTOINCREMENT, created_at REAL, mint TEXT, symbol TEXT, name TEXT,
     narrative TEXT, source TEXT, match_score REAL, safety INTEGER, momentum INTEGER,
@@ -127,6 +128,12 @@ class Storage:
         return self.db.execute("SELECT * FROM census WHERE created_at>=? ORDER BY created_at",
                                (since,)).fetchall()
 
+    def creator_graduations(self, creator: str, exclude_mint: str = "") -> int:
+        """Nombre de tokens de ce créateur qui ont gradué (d'après le recensement)."""
+        row = self.db.execute("SELECT COUNT(*) FROM census WHERE creator=? AND graduated=1 AND mint!=?",
+                              (creator, exclude_mint)).fetchone()
+        return int(row[0])
+
     def census_count(self) -> int:
         return int(self.db.execute("SELECT COUNT(*) FROM census").fetchone()[0])
 
@@ -215,7 +222,7 @@ class Storage:
     # ---------------------------------------------------------------- trades
     # Ajoutées pour le suivi des sorties : multiples par rapport au prix d'achat
     ADDED_TRADE_COLUMNS = (("exit_x", "REAL"), ("peak_x", "REAL"), ("after_max_x", "REAL"),
-                           ("after_end_x", "REAL"), ("graduated", "INTEGER"))
+                           ("after_end_x", "REAL"), ("graduated", "INTEGER"), ("source", "TEXT"))
 
     def add_trade(self, *, mode: str, mint: str, symbol: str, name: str, opened_at: float,
                   entry_sol: float, exit_sol: float, pnl_sol: float, reason: str,
