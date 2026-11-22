@@ -281,6 +281,7 @@ avec `tmux`, `screen` ou un service `systemd`.
 | `/bilan` | Bilan paper trading des alertes |
 | `/analyse` | Ce que sont devenus **tous** les tokens repérés (alertés et refusés) 30 min après |
 | `/export` | Fichier CSV (Excel) de tous les candidats et de leurs mesures |
+| `/export recensement 2` | Tous les tokens des 2 derniers jours avec leur courbe (pour les statistiques) |
 | `/status` | État du bot |
 | `/pause` · `/reprendre` | Coupe / remet les alertes |
 | `/trading` · `/trading on` · `/trading off` | État du trading, l'activer, le couper |

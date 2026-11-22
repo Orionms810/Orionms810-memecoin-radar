@@ -29,6 +29,12 @@ CREATE TABLE IF NOT EXISTS trades(
     id INTEGER PRIMARY KEY AUTOINCREMENT, mode TEXT, mint TEXT, symbol TEXT, name TEXT,
     opened_at REAL, closed_at REAL, entry_sol REAL, exit_sol REAL, pnl_sol REAL, reason TEXT);
 CREATE TABLE IF NOT EXISTS kv(key TEXT PRIMARY KEY, value TEXT);
+CREATE TABLE IF NOT EXISTS census(
+    mint TEXT PRIMARY KEY, created_at REAL, symbol TEXT, name TEXT, creator TEXT,
+    dev_buy_pct REAL, dev_sol REAL, mcap0 REAL, narrative TEXT, creator_24h INTEGER,
+    creator_prev INTEGER, points INTEGER, path TEXT, mcap_5m REAL, mcap_15m REAL,
+    mcap_30m REAL, max_mcap REAL, graduated INTEGER);
+CREATE INDEX IF NOT EXISTS idx_census_created ON census(created_at);
 CREATE TABLE IF NOT EXISTS candidates(
     id INTEGER PRIMARY KEY AUTOINCREMENT, created_at REAL, mint TEXT, symbol TEXT, name TEXT,
     narrative TEXT, source TEXT, match_score REAL, safety INTEGER, momentum INTEGER,
@@ -103,6 +109,28 @@ class Storage:
         return self.db.execute(
             f"SELECT mint, creator_sold_30, mcap_eval, mcap_30, max_mcap_30 FROM candidates "
             f"WHERE mint IN ({marks})", mints).fetchall()
+
+    CENSUS_COLUMNS = ("mint", "created_at", "symbol", "name", "creator", "dev_buy_pct", "dev_sol",
+                      "mcap0", "narrative", "creator_24h", "creator_prev", "points", "path",
+                      "mcap_5m", "mcap_15m", "mcap_30m", "max_mcap", "graduated")
+
+    def census_add(self, row: dict[str, Any]) -> None:
+        cols = [c for c in self.CENSUS_COLUMNS if c in row]
+        self.db.execute(
+            f"INSERT OR REPLACE INTO census({','.join(cols)}) VALUES ({','.join('?' * len(cols))})",
+            [row[c] for c in cols])
+        self.db.commit()
+
+    def census_rows(self, since: float = 0) -> list[sqlite3.Row]:
+        return self.db.execute("SELECT * FROM census WHERE created_at>=? ORDER BY created_at",
+                               (since,)).fetchall()
+
+    def census_count(self) -> int:
+        return int(self.db.execute("SELECT COUNT(*) FROM census").fetchone()[0])
+
+    def prune_census(self, keep_days: float) -> None:
+        self.db.execute("DELETE FROM census WHERE created_at<?", (time.time() - keep_days * 86400,))
+        self.db.commit()
 
     def prune(self, older_than_days: float = 14) -> None:
         now = time.time()
@@ -208,12 +236,17 @@ class Storage:
         "age_s", "decision", "detail", "mcap_eval", "mcap_5", "mcap_15", "mcap_30", "max_mcap_30",
         "creator_sold_30", "traded", "trade_detail",
         "funding_checked", "funding_shared", "funding_creator", "funding_fresh_pct",
-        "creator", "creator_prev", "creator_exited_prev", "creator_dead_prev", "creator_graduated_prev")
+        "creator", "creator_prev", "creator_exited_prev", "creator_dead_prev", "creator_graduated_prev",
+        "flow_trades", "flow_avg_buy", "flow_small_pct", "flow_max_sell", "flow_accel",
+        "flow_early_sellers", "flow_roundtrip")
     ADDED_CANDIDATE_COLUMNS = (("funding_checked", "INTEGER"), ("funding_shared", "INTEGER"),
                                ("funding_creator", "INTEGER"), ("funding_fresh_pct", "REAL"),
                                ("creator", "TEXT"), ("creator_prev", "INTEGER"),
                                ("creator_exited_prev", "INTEGER"), ("creator_dead_prev", "INTEGER"),
-                               ("creator_graduated_prev", "INTEGER"))
+                               ("creator_graduated_prev", "INTEGER"), ("flow_trades", "INTEGER"),
+                               ("flow_avg_buy", "REAL"), ("flow_small_pct", "REAL"),
+                               ("flow_max_sell", "REAL"), ("flow_accel", "REAL"),
+                               ("flow_early_sellers", "INTEGER"), ("flow_roundtrip", "INTEGER"))
 
     def add_candidate(self, row: dict[str, Any]) -> int:
         cols = [c for c in row if c in self.CANDIDATE_COLUMNS]

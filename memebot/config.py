@@ -12,6 +12,7 @@ from dotenv import load_dotenv
 
 from .risk import RiskThresholds
 from .trading.settings import TradingSettings
+from .census import CensusSettings
 from .trending import TrendSettings
 
 DEFAULT_GENERIC = [
@@ -77,6 +78,7 @@ class Settings:
     risk: RiskThresholds = field(default_factory=RiskThresholds)
     trading: TradingSettings = field(default_factory=TradingSettings)
     trend: TrendSettings = field(default_factory=TrendSettings)
+    census: CensusSettings = field(default_factory=CensusSettings)
     wallet_secret: str | None = None  # clé privée du wallet dédié (mode réel uniquement)
     pumpportal_api_key: str | None = None  # optionnel et payant : trades via PumpPortal
     solana_ws_url: str | None = None  # websocket RPC (sinon déduit de SOLANA_RPC_URL)
@@ -149,6 +151,9 @@ def load_settings(config_path: str | Path = "config.toml", env_path: str | Path 
         for key, value in (raw.get("risk") or {}).items():
             if hasattr(s.risk, key) and value is not None:
                 setattr(s.risk, key, value)
+        for key, value in (raw.get("recensement") or {}).items():
+            if hasattr(s.census, key) and value is not None:
+                setattr(s.census, key, value)
         for key, value in (raw.get("trending") or {}).items():
             if hasattr(s.trend, key) and value is not None:
                 setattr(s.trend, key, value)

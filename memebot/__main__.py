@@ -154,7 +154,7 @@ async def run_live(settings: Settings) -> None:
             log.info("Trades : lus sur la blockchain Solana (gratuit)")
         engine.feed = feed
         engine.token_feed = tokens
-        coros += [engine.housekeeping(), engine.journal.run(), engine.run_trending()]
+        coros += [engine.housekeeping(), engine.journal.run(), engine.run_curves()]
         trader = await build_trader(settings, engine, http, feed)
         if trader:
             coros.append(trader.run())

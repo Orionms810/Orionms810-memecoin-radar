@@ -94,6 +94,7 @@ async def test_full_flow_alert_then_dev_sells(setup):
     await engine.journal.tick(time.time() + 1801)
     row = engine.storage.candidate_rows()[0]
     assert row["decision"] == "alerte" and row["creator_sold_30"] == 1
+    assert row["flow_trades"] == 12 and row["flow_avg_buy"] == 0.5  # mesures de flux
     assert row["mcap_30"] == pytest.approx(mcap * 0.3)
     stats = engine.storage.paper_stats()
     assert stats["closed"] == 1 and stats["rugs"] == 1 and stats["median_end_x"] < 1

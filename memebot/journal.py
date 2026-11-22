@@ -101,6 +101,8 @@ class CandidateJournal:
             "creator_dead_prev": creator.dead if creator else None,
             "creator_graduated_prev": creator.graduated if creator else None,
         }
+        if stats is not None:
+            row.update(stats.flow_features())
         row_id = self.storage.add_candidate(row)
         if mcap > 0 and len(self.tracked) < self.max_tracked:
             self.tracked[token.mint] = Tracked(row_id=row_id, mint=token.mint, creator=token.creator,

@@ -120,6 +120,16 @@ creator_linked_critical = 3 # acheteurs financés par le créateur : à partir d
 rugger_critical = 2         # anciens tokens où le créateur a vidé ses parts : à partir de 2, refus direct
 dead_tokens_warn = 3        # anciens tokens du créateur morts sans décoller
 
+[recensement]
+# Enregistre TOUS les nouveaux tokens et leur évolution (courbe relevée toutes les 15 s
+# pendant 3 min, puis à 5, 15 et 30 min), pour les statistiques. Partage les lectures de
+# la stratégie tendance : presque aucun crédit RPC en plus.
+# Export : /export recensement 2 (les 2 derniers jours)
+enabled = true
+sample_pct = 100            # part des nouveaux tokens recensés
+max_tracked = 3000
+keep_days = 21              # conservation en base
+
 [trending]
 # Stratégie « tendance » : tokens qui décollent tout seuls, sans news (alertes 🔥).
 # On/off à chaud depuis Telegram : /tendance on · /tendance off

@@ -25,6 +25,7 @@ from .models import (
     Trade,
     TradeStats,
 )
+from .census import TokenCensus
 from .creator import build_history, summarize as summarize_history
 from .journal import ALERT, REJECT_LIMIT, REJECT_MOMENTUM, REJECT_SAFETY, CandidateJournal
 from .journal import format_analysis, to_csv
@@ -61,6 +62,7 @@ HELP = """🤖 <b>Memecoin Radar</b> — commandes
 /bilan — bilan « paper trading » des alertes
 /analyse — ce que sont devenus les tokens alertés ET refusés
 /export — fichier Excel (CSV) de tous les candidats
+/export recensement 2 — tous les tokens des 2 derniers jours (pour les stats)
 /status — état du bot
 /pause · /reprendre — couper / remettre les alertes
 <b>Chaînes Telegram</b> (tweets d'Elon, Trump... republiés)
@@ -142,6 +144,7 @@ class Engine:
         self._seen_mints: dict[str, None] = {}
         self.tg_channels: Any = None  # sources.telegram_channels si configuré
         self.journal = CandidateJournal(storage, fetch_curves=self._fetch_curves)
+        self.census = TokenCensus(storage, settings.census)
         # Avant le flux de trades on-chain (nov. 2026), aucun trade n'arrivait : les
         # lignes du journal de cette période sont fausses (tout à x1.00). On les ignore.
         self.journal_since = storage.kv_get("journal_since")
@@ -239,6 +242,12 @@ class Engine:
         self._try_match(token, self.book.live())
         if self.trend_enabled and token.mint not in self.candidates:
             self._start_probe(token)
+        if self.s.census.enabled:
+            cand = self.candidates.get(token.mint)
+            prev = self.storage.creator_tokens(token.creator, token.mint, limit=50) if token.creator else []
+            recent = sum(1 for r in prev if (r["created_at"] or 0) >= token.created_at - 86400)
+            self.census.add(token, narrative=cand.match.narrative.id if cand else "",
+                            creator_24h=recent, creator_prev=len(prev))
 
     def _retro_match(self, narr: Narrative) -> None:
         """Un narratif arrive : des tokens ont peut-être été créés juste avant."""
@@ -290,16 +299,25 @@ class Engine:
     async def _fetch_curves(self, addresses: list[str]) -> dict[str, Any]:
         return await _safe(self.data.curves(addresses), 15) or {}
 
-    async def poll_trending(self, now: float | None = None) -> None:
-        """Lit les courbes des tokens en observation et promeut ceux qui décollent."""
+    async def poll_curves(self, now: float | None = None) -> None:
+        """Un passage : lit en une fois les courbes utiles au recensement et à la tendance."""
         now = now or time.time()
         for mint, probe in list(self.probation.items()):
             if now > probe.until:
                 del self.probation[mint]
-        if not self.probation:
+        probes = list(self.probation.values()) if self.trend_enabled else []
+        addrs = {p.token.bonding_curve for p in probes}
+        addrs.update(self.census.due(now))
+        if not addrs:
             return
-        probes = list(self.probation.values())
-        curves = await self._fetch_curves([p.token.bonding_curve for p in probes])
+        curves = await self._fetch_curves(sorted(addrs))
+        self.census.record(curves, now)
+        if probes:
+            self._apply_trend(probes, curves, now)
+
+    poll_trending = poll_curves  # ancien nom
+
+    def _apply_trend(self, probes: list[Probe], curves: dict[str, Any], now: float) -> None:
         while self._trend_checks and now - self._trend_checks[0] > 3600:
             self._trend_checks.popleft()
         for probe in probes:
@@ -321,14 +339,15 @@ class Engine:
             self._add_candidate(token, MatchResult(self.trend_narrative, 1.0, [reason]),
                                 self.s.observe_seconds, curve=curve)
 
-    async def run_trending(self) -> None:
+    async def run_curves(self) -> None:
         while True:
-            if self.trend_enabled:
-                try:
-                    await self.poll_trending()
-                except Exception:  # noqa: BLE001
-                    log.exception("Tendance : erreur de lecture des courbes")
+            try:
+                await self.poll_curves()
+            except Exception:  # noqa: BLE001
+                log.exception("Lecture des courbes : erreur")
             await asyncio.sleep(self.s.trend.poll_seconds)
+
+    run_trending = run_curves  # ancien nom
 
     def set_trend(self, enabled: bool) -> None:
         self.trend_enabled = enabled
@@ -594,6 +613,16 @@ class Engine:
                     "/tendance on · /tendance off · /tendance achats on · /tendance achats off")
         if cmd == "/analyse":
             return format_analysis(self.storage.candidate_rows(self.journal_since))
+        if cmd == "/export" and arg.lower().split()[:1] == ["recensement"]:
+            parts = arg.split()
+            days = float(parts[1]) if len(parts) > 1 and parts[1].replace(".", "", 1).isdigit() else 2
+            rows = self.storage.census_rows(time.time() - days * 86400)
+            if not rows:
+                return "Recensement vide pour l'instant (il faut ~30 min par token)."
+            name = time.strftime("recensement-%Y%m%d-%H%M.csv")
+            ok = await self.notifier.send_document(
+                name, to_csv(rows), f"{len(rows)} tokens recensés sur {days:g} jour(s)")
+            return None if ok else "Envoi du fichier impossible (Telegram non configuré ?)."
         if cmd == "/export":
             rows = self.storage.candidate_rows(self.journal_since)
             if not rows:
@@ -628,6 +657,8 @@ class Engine:
                     f"Trades : {state(self.feed)} · {getattr(self.feed, 'messages', 0)} messages reçus\n"
                     f"Narratifs actifs : {len(self.book.live())} · tokens surveillés : "
                     f"{len(self.candidates)} · alertes : {self.alerts_sent}\n"
+                    f"Recensement : {self.storage.census_count()} tokens enregistrés · "
+                    f"{len(self.census.tracked)} en cours\n"
                     f"Tendance : {'on' if self.trend_enabled else 'off'} "
                     f"({len(self.probation)} en observation)\n"
                     f"IA : {'oui' if self.ai else 'non'} · SOL : {sol} · "
@@ -648,6 +679,7 @@ class Engine:
                 self.sol_usd = price
             if now - last_prune > 6 * 3600:
                 self.storage.prune()
+                self.storage.prune_census(self.s.census.keep_days)
                 last_prune = now
             await asyncio.sleep(every)
 

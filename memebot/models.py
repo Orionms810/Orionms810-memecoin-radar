@@ -149,6 +149,7 @@ class TradeStats:
     sellers: set[str] = field(default_factory=set)
     early_buyers: set[str] = field(default_factory=set)
     first_buyers: list[str] = field(default_factory=list)  # dans l'ordre, sans le créateur
+    trade_log: list[tuple[float, bool, float, str]] = field(default_factory=list)  # (ts, achat, SOL, wallet)
     creator_sold: bool = False
     creator_sold_sol: float = 0.0
     creator_balance: float | None = None
@@ -168,6 +169,8 @@ class TradeStats:
         )
 
     def apply(self, t: Trade, early_window: float = 2.0) -> None:
+        if len(self.trade_log) < 2000:
+            self.trade_log.append((t.ts, t.is_buy, t.sol_amount, t.trader))
         if t.is_buy:
             if (t.trader not in self.buyers and t.trader != self.creator
                     and len(self.first_buyers) < 20):
@@ -195,6 +198,32 @@ class TradeStats:
             self.max_mcap = max(self.max_mcap, t.market_cap_sol)
         if t.v_tokens is not None:
             self.last_v_tokens = t.v_tokens
+
+    def flow_features(self) -> dict[str, float | int | None]:
+        """Mesures fines du flux acheteurs/vendeurs (pour les statistiques)."""
+        log_ = self.trade_log
+        if not log_:
+            return {"flow_trades": 0, "flow_avg_buy": None, "flow_small_pct": None,
+                    "flow_max_sell": None, "flow_accel": None, "flow_early_sellers": 0,
+                    "flow_roundtrip": 0}
+        buys = [sol for _, is_buy, sol, _ in log_ if is_buy]
+        sells = [sol for _, is_buy, sol, _ in log_ if not is_buy]
+        t0, t1 = log_[0][0], log_[-1][0]
+        mid = (t0 + t1) / 2
+        first = sum(sol for ts, is_buy, sol, _ in log_ if is_buy and ts <= mid)
+        second = sum(sol for ts, is_buy, sol, _ in log_ if is_buy and ts > mid)
+        sellers = {w for _, is_buy, _, w in log_ if not is_buy}
+        buyers = {w for _, is_buy, _, w in log_ if is_buy}
+        return {
+            "flow_trades": len(log_),
+            "flow_avg_buy": round(sum(buys) / len(buys), 4) if buys else None,
+            "flow_small_pct": round(100 * sum(b < 0.1 for b in buys) / len(buys), 1) if buys else None,
+            "flow_max_sell": round(max(sells), 4) if sells else 0.0,
+            # > 1 : les achats accélèrent ; < 1 : ils ralentissent
+            "flow_accel": round(second / first, 3) if first > 0 else None,
+            "flow_early_sellers": sum(1 for w in self.first_buyers[:10] if w in sellers),
+            "flow_roundtrip": len(buyers & sellers),
+        }
 
     @property
     def curve_progress(self) -> float | None:
